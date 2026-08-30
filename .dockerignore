@@ -1,0 +1,18 @@
+node_modules
+.next
+out
+.git
+.gitignore
+
+# Env files — real secrets never belong in the build context/image.
+.env
+.env.local
+.env*.local
+
+# PocketBase runtime data (lives in its own container/volume, not here)
+pb_data
+
+npm-debug.log*
+*.tsbuildinfo
+README.md
+deploy

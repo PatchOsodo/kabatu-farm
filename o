@@ -1,0 +1,45 @@
+You're right. For a generic handoff to Claude, I'd keep it this simple:
+
+Proceed with the implementation based on our agreed requirements and the
+current repository as the baseline. Do not recreate or reconsider work that
+has already been completed.
+
+Work incrementally in small, testable batches rather than attempting the
+entire task at once.
+
+After each batch, stop and provide:
+- What was changed
+- Files modified
+- What I should test
+
+Wait for my confirmation before continuing. If I report bugs, address them
+and stop again for testing. If I respond with `PASS`, proceed with the next
+batch.
+
+### File Output Rule
+
+If a modified file is LESS THAN 800 lines, provide the complete updated file.
+
+If it is 800 lines or more, do not provide the full file. Use:
+
+CURRENT:
+```language
+{exact current code}
+
+REPLACEMENT:
+
+{exact replacement code}
+
+For large files, make the replacement blocks exact and unambiguous.
+
+
+
+Do not make assumptions about the codebase. Inspect the current implementation
+before modifying anything, preserve existing functionality, and avoid
+unnecessary refactoring.
+
+
+
+Start with the first logical batch only.
+
+

@@ -1,0 +1,66 @@
+# Explicit project name — Compose otherwise derives it from the directory
+# name, which is fine here, but pinning it means container/network/volume
+# prefixes ("kabatu-farm-...") stay stable even if this folder gets moved
+# or renamed later, which matters once several projects share this host.
+name: kabatu-farm
+
+services:
+  pocketbase:
+    build:
+      context: ./pocketbase
+    image: kabatu-pocketbase:latest
+    container_name: kabatu-pocketbase
+    restart: unless-stopped
+    # Container-side port (8090) is fixed and only reachable inside the
+    # kabatu-net bridge network — other projects on this host can't see it
+    # regardless of what they use internally, so no cross-project collision
+    # risk there. The HOST-side port is what's shared machine-wide across
+    # every container on /home/Docker, so it's pulled from .env instead of
+    # hardcoded — see the port registry comment in .env.example.
+    ports:
+      - "127.0.0.1:${KABATU_PB_HOST_PORT:-8095}:8090"
+    volumes:
+      - ./pb_data:/pb/pb_data
+      - ./pb_migrations:/pb/pb_migrations
+      - ./pb_hooks:/pb/pb_hooks
+    networks:
+      - kabatu-net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8090/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  nextjs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Baked into the client bundle at build time. Must be the URL the
+        # BROWSER can reach (auth/login runs client-side, see lib/pb.ts) —
+        # e.g. https://pb.kabatufarm.duckdns.org — not "http://pocketbase:8090".
+        NEXT_PUBLIC_POCKETBASE_URL: ${NEXT_PUBLIC_POCKETBASE_URL:-http://127.0.0.1:8095}
+    image: kabatu-nextjs:latest
+    container_name: kabatu-nextjs
+    restart: unless-stopped
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    # Runtime env — read live by Node.js on the server, unlike the
+    # NEXT_PUBLIC_ build arg above which gets baked in at image-build time.
+    # "pocketbase" here is the Compose service name, resolved via Docker's
+    # internal DNS on kabatu-net; 8090 is that container's own internal
+    # port, not the host-mapped KABATU_PB_HOST_PORT.
+    environment:
+      POCKETBASE_INTERNAL_URL: http://pocketbase:8090
+      DEMO_USERNAME: demo
+      DEMO_PASSWORD: "Ch@m3l30n@"
+    ports:
+      - "127.0.0.1:${KABATU_WEB_HOST_PORT:-3000}:3000"
+    networks:
+      - kabatu-net
+
+networks:
+  kabatu-net:
+    driver: bridge

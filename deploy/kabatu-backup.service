@@ -1,0 +1,18 @@
+# /etc/systemd/system/kabatu-backup.service
+#
+# Install alongside kabatu-backup.timer:
+#   sudo cp kabatu-backup.service kabatu-backup.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kabatu-backup.timer
+#
+# Check status / logs:
+#   systemctl list-timers kabatu-backup.timer
+#   journalctl -u kabatu-backup.service
+
+[Unit]
+Description=Kabatu Farm - daily PocketBase backup to Google Drive
+
+[Service]
+Type=oneshot
+User=kabatu
+ExecStart=/opt/kabatu-farm/deploy/kabatu-backup.sh

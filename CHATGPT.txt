@@ -1,0 +1,171 @@
+I had a look at kabatufarm.duckdns.org on the live site. My honest mobile-first take: the underlying UX is promising and quite clean, but the current interface feels more like an internal admin dashboard than a polished mobile farm-operations app. 
+K
+kabatufarm.duckdns.org
+
+What’s working well
+The information architecture is immediately understandable. Dairy, sheep, poultry, and crops are the four obvious operational areas. 
+K
+kabatufarm.duckdns.org
+The overview is appropriately simple. Showing income, expenses, and net for each area gives the user a quick financial snapshot.
+KES is used directly, which makes the financial information feel appropriately localized rather than generic.
+The hamburger/navigation treatment is sensible on mobile. I like that the top-level categories remain available without consuming the whole screen.
+The dashboard doesn't appear overloaded with decorative UI. That's a good foundation for something people may use repeatedly while actually working on a farm.
+Where I'd be critical
+1. The page doesn't yet have a strong mobile "job to be done"
+
+The first thing I see is essentially:
+
+Farm Overview → four categories → financial summaries.
+
+But if I'm standing in a field with my phone, what do you want me to do next?
+
+A farm operations app should probably make actions extremely prominent:
+
+Record milk
+Add an expense
+Record a sale
+Add livestock
+Record mortality/birth
+Record feed
+View today's activity
+
+Right now, the interface communicates "here is your data" more strongly than "here's what you can do."
+
+I'd make the primary action(s) almost impossible to miss.
+
+2. The zero states are technically clean but emotionally dead
+
+There are lots of:
+
+KES 0 → KES 0 → +KES 0
+
+That is accurate, but on mobile it creates a lot of visual repetition. For a new/quiet farm, the dashboard can feel like an empty spreadsheet.
+
+I'd use meaningful empty states instead:
+
+No poultry activity yet
+Start tracking your flock to see costs, sales and performance here.
++ Add flock
+
+That turns an empty dashboard into an invitation.
+
+3. The cards need stronger visual hierarchy
+
+The current structure gives roughly equal visual weight to:
+
+number of animals
+income
+expense
+net
+
+But those aren't equally important.
+
+I'd make the hierarchy something like:
+
+Dairy
+2 active cattle
+
++ KES 12,450 net this month
+
+Income · KES 20,000
+Expenses · KES 7,550
+
+That makes the answer visible before the supporting numbers.
+
+4. "Operations Ledger" is slightly accounting-centric
+
+This is subtle, but important.
+
+"Operations Ledger" makes me think bookkeeping software.
+
+If the product's goal is broader farm management, something like:
+
+Kabatu Farm
+Farm operations
+
+or
+
+Farm Dashboard
+
+would feel more natural.
+
+You can still have financial ledgers inside the relevant sections.
+
+5. Mobile navigation could be more action-oriented
+
+The current navigation is basically:
+
+Overview / Dairy Cattle / Sheep / Poultry / Crops & Fields
+
+That's logical, but I'd seriously consider a bottom navigation model on mobile:
+
+Home · Livestock · Crops · Money · More
+
+Then put a persistent ＋ action in the middle or corner.
+
+That matches the way people tend to use mobile operational apps: look → record something → move on.
+
+6. I'd reduce the amount of scrolling
+
+The overview currently stacks four fairly similar sections vertically. On a phone, that means a lot of screen real estate gets consumed before you get to anything beyond the dashboard.
+
+I'd experiment with:
+
+a compact financial summary at the top
+horizontally scrollable category cards
+"Today's activity"
+primary quick actions
+detailed sections below
+
+The user should be able to understand the state of the farm in one screenful, then drill down.
+
+The biggest UX opportunity
+
+I'd design the mobile home screen around this question:
+
+"What does the farmer need to know or record right now?"
+
+Something closer to:
+
+Kabatu Farm                         ☰
+
+Good afternoon 👋
+
+THIS MONTH
+Net              KES 42,350
+Income           KES 96,500
+Expenses         KES 54,150
+
+QUICK ACTIONS
+[ + Milk ]  [ + Expense ]
+[ + Sale ]  [ + Activity ]
+
+YOUR FARM
+🐄 Dairy        2 active
+🐑 Sheep        0
+🐔 Poultry      0
+🌾 Crops        0 acres
+
+TODAY
+No activity recorded yet
+
+
+That feels much more like a tool someone works with rather than a dashboard someone checks.
+
+One thing I'd not change
+
+I wouldn't make it visually flashy.
+
+For this kind of product, clarity beats aesthetics. Big touch targets, excellent typography, strong contrast, fast data entry and obvious status indicators will matter far more than gradients, animations, elaborate charts, etc.
+
+Overall
+
+Current UX foundation: 7/10.
+Mobile-first product UX: ~6/10.
+
+The structure is good. The interface is clean. But I'd push it substantially further toward fast, thumb-friendly operational workflows and away from static financial dashboard.
+
+If you want, I can also do a screen-by-screen mobile UX teardown of the site (navigation, dashboard, cattle flow, forms, tables, empty states, etc.) and give you a prioritized P0/P1/P2 redesign list.
+
+K
+Sources

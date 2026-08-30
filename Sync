@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE_DIR="/home/Docker/kabatu-farm/"
+REMOTE_TARGET="pocketbase@163.245.217.218:/home/Docker/kabatu-farm/"
+
+# Strict Exclusions (Prevents syncing junk or breaking VPS state)
+BASE_EXCLUDES=(
+  --exclude=pb_data
+  --exclude=node_modules
+  --exclude=.next
+  --exclude=.git
+  --exclude=.DS_Store
+  --exclude=.vscode
+  --exclude=.idea
+  --exclude=deploy-sync.sh
+  --exclude=.env
+  --exclude=Sync
+)
+
+echo "=========================================="
+echo "    Kabatu Farm Deployment Sync Tool     "
+echo "=========================================="
+echo "1) Standard Sync (Sync modified codebase, keep pb_data)"
+echo "2) Dry Run (Preview what files WOULD transfer)"
+echo "3) Sync WITHOUT Migrations (Exclude pb_data & pb_migrations)"
+echo "4) Sync with --delete (Remove deleted local files from VPS)"
+echo "5) Dry Run for --delete"
+echo "6) Custom SSH Port"
+echo "Q) Quit"
+echo "=========================================="
+
+read -p "Enter choice [1-6 or Q]: " CHOICE
+
+EXTRA_FLAGS=()
+
+case $CHOICE in
+  1) echo "▶ Running Standard Sync..." ;;
+  2) echo "▶ Running Dry Run (Preview)..."; EXTRA_FLAGS+=("-n") ;;
+  3) echo "▶ Running Sync (Excluding pb_migrations)..."; EXTRA_FLAGS+=("--exclude=pb_migrations") ;;
+  4) 
+    echo "⚠️  Running Sync with --delete!"
+    read -p "Are you sure? (y/N): " CONFIRM
+    [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+    EXTRA_FLAGS+=("--delete") 
+    ;;
+  5) echo "▶ Running Dry Run for --delete..."; EXTRA_FLAGS+=("-n" "--delete") ;;
+  6) 
+    read -p "Enter custom SSH port: " SSH_PORT
+    EXTRA_FLAGS+=("-e" "ssh -p ${SSH_PORT}") 
+    ;;
+  [qQ]) exit 0 ;;
+  *) echo "Invalid option."; exit 1 ;;
+esac
+
+# Itemized changes (-i) shows exactly state of each file:
+# >f+++++++++ (new file), >f.st...... (modified file)
+EXTRA_FLAGS+=("-i" "--progress")
+
+echo "------------------------------------------"
+echo "Executing sync..."
+echo "------------------------------------------"
+
+# Execute rsync and capture output
+OUTPUT=$(rsync -avz "${BASE_EXCLUDES[@]}" "${EXTRA_FLAGS[@]}" "$SOURCE_DIR" "$REMOTE_TARGET")
+
+echo "$OUTPUT"
+
+echo "------------------------------------------"
+if echo "$OUTPUT" | grep -q "^<f\|^>f\|^cd"; then
+  echo "✅ Sync complete! Transferred/updated the files listed above."
+else
+  echo "ℹ️  No changes detected! Local and Remote directories are already 100% in sync."
+fi

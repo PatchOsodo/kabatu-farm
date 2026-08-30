@@ -107,4 +107,3 @@ Rough sequence:
 
 I haven't written the Next.js systemd service or the Caddy/Nginx config yet — happy to
 once PocketBase is running and you're ready for that step.
-# kabatu-farm

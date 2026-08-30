@@ -1,0 +1,37 @@
+# /etc/systemd/system/kabatu-nextjs.service
+#
+# Points at your existing project directory. Assumes it's owned by a real
+# Linux user "Farm" — verify with:  stat -c "%U:%G" /home/Farm/kabatu-farm
+# If that comes back as something else, change User=/Group= below to match
+# (or chown the directory to Farm:Farm — either works, just be consistent).
+#
+# Install:
+#   sudo cp kabatu-nextjs.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kabatu-nextjs
+#
+# Prereqs: in /home/Farm/kabatu-farm, already run:
+#   npm install && npm run build
+# and .env.local exists there with the real NEXT_PUBLIC_POCKETBASE_URL.
+# Re-run both after every deploy (new code), then:
+#   sudo systemctl restart kabatu-nextjs
+
+[Unit]
+Description=Kabatu Farm - Next.js app
+After=network.target kabatu-pocketbase.service
+
+[Service]
+Type=simple
+User=Farm
+Group=Farm
+WorkingDirectory=/home/Farm/kabatu-farm
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# Confirm this path matches `which node` on the VPS.
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+# Reverse-proxy 127.0.0.1:3000 with nginx for TLS — don't expose Next.js directly.
+
+[Install]
+WantedBy=multi-user.target

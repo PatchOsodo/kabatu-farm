@@ -1,0 +1,37 @@
+# /etc/systemd/system/kabatu-pocketbase.service
+#
+# Runs as the SAME Linux user as your tournament PocketBase (pocketbase),
+# but as a completely separate process with its own directory, own
+# pb_data, and own port (8091) — no overlap with the tournament instance.
+#
+# Setup:
+#   sudo -u pocketbase mkdir -p /home/pocketbase/kabatu-farm/pb_migrations
+#   sudo -u pocketbase cp /path/to/pocketbase /home/pocketbase/kabatu-farm/pocketbase
+#   sudo -u pocketbase cp pb_migrations/001_cattle_collection.js \
+#        /home/pocketbase/kabatu-farm/pb_migrations/
+#
+# Install:
+#   sudo cp kabatu-pocketbase.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kabatu-pocketbase
+#
+# Sanity check before enabling — confirm 8091 is free and doesn't collide
+# with the tournament instance's port:
+#   sudo ss -tlnp | grep 809
+
+[Unit]
+Description=Kabatu Farm - PocketBase
+After=network.target
+
+[Service]
+Type=simple
+User=pocketbase
+Group=pocketbase
+WorkingDirectory=/home/pocketbase/kabatu-farm
+ExecStart=/home/pocketbase/kabatu-farm/pocketbase serve --http=127.0.0.1:8091
+Restart=always
+RestartSec=5
+# Reverse-proxy 127.0.0.1:8091 with nginx for TLS — don't expose PocketBase directly.
+
+[Install]
+WantedBy=multi-user.target

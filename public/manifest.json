@@ -1,0 +1,10 @@
+{
+  "name": "Kabatu Farm — Milk Entry",
+  "short_name": "Milk Entry",
+  "start_url": "/dairy/milk-log/entry",
+  "scope": "/dairy/",
+  "display": "standalone",
+  "background_color": "#faf7f0",
+  "theme_color": "#1a3a2e",
+  "icons": []
+}
