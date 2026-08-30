@@ -11,13 +11,13 @@ export interface ModuleNavItem {
 
 export const NAV_ITEMS: ModuleNavItem[] = [
   { key: "dashboard", label: "Overview", href: "/", glyph: "◆" },
-{ key: "dairy", label: "Dairy Cattle", href: "/dairy", glyph: "🐄" },
-{ key: "sheep", label: "Sheep", href: "/sheep", glyph: "🐑" },
-{ key: "poultry", label: "Poultry", href: "/poultry", glyph: "🐔" },
-{ key: "crops", label: "Crops & Fields", href: "/crops", glyph: "🌾" },
-{ key: "inventory", label: "Inventory", href: "/inventory", glyph: "▤" },
-{ key: "tasks", label: "Tasks", href: "/tasks", glyph: "☑" },
-{ key: "financials", label: "Financials", href: "/financials", glyph: "◈" },
+  { key: "dairy", label: "Dairy Cattle", href: "/dairy", glyph: "🐄" },
+  { key: "sheep", label: "Sheep", href: "/sheep", glyph: "🐑" },
+  { key: "poultry", label: "Poultry", href: "/poultry", glyph: "🐔" },
+  { key: "crops", label: "Crops & Fields", href: "/crops", glyph: "🌾" },
+  { key: "inventory", label: "Inventory", href: "/inventory", glyph: "▤" },
+  { key: "tasks", label: "Tasks", href: "/tasks", glyph: "☑" },
+  { key: "financials", label: "Financials", href: "/financials", glyph: "◈" },
 ];
 
 export const ENTERPRISE_LABEL: Record<Enterprise, string> = {
@@ -36,9 +36,8 @@ export const ENTERPRISE_LABEL: Record<Enterprise, string> = {
 // MODULE_ROLE_REQUIREMENTS) — "Farm" is the public tier, "Ops" and
 // "Money" are the authenticated tier.
 //
-// "Farm" currently defaults to /dairy when tapped directly (no
-// picker page exists yet) — flagged for a follow-up batch, not
-// forgotten.
+// "Farm" now lands on /farm, a 4-tile picker page (see app/farm/page.tsx)
+// rather than defaulting into /dairy.
 // ─────────────────────────────────────────────────────────────
 
 export interface NavGroupItem {
@@ -54,28 +53,28 @@ export interface NavGroupItem {
 
 export const NAV_GROUPS: NavGroupItem[] = [
   { key: "home", label: "Home", href: "/", glyph: "◆", moduleKeys: [], matchPrefixes: [] },
-{
-  key: "farm",
-  label: "Farm",
-  href: "/dairy",
-  glyph: "🌾",
-  moduleKeys: ["dairy", "sheep", "poultry", "crops"],
-  matchPrefixes: ["/dairy", "/sheep", "/poultry", "/crops"],
-},
-{
-  key: "ops",
-  label: "Ops",
-  href: "/tasks",
-  glyph: "☑",
-  moduleKeys: ["tasks", "inventory"],
-  matchPrefixes: ["/tasks", "/inventory"],
-},
-{
-  key: "money",
-  label: "Money",
-  href: "/financials",
-  glyph: "◈",
-  moduleKeys: ["financials"],
-  matchPrefixes: ["/financials"],
-},
+  {
+    key: "farm",
+    label: "Farm",
+    href: "/farm",
+    glyph: "🌾",
+    moduleKeys: ["dairy", "sheep", "poultry", "crops"],
+    matchPrefixes: ["/farm", "/dairy", "/sheep", "/poultry", "/crops"],
+  },
+  {
+    key: "ops",
+    label: "Ops",
+    href: "/tasks",
+    glyph: "☑",
+    moduleKeys: ["tasks", "inventory"],
+    matchPrefixes: ["/tasks", "/inventory"],
+  },
+  {
+    key: "money",
+    label: "Money",
+    href: "/financials",
+    glyph: "◈",
+    moduleKeys: ["financials"],
+    matchPrefixes: ["/financials"],
+  },
 ];

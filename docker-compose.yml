@@ -57,7 +57,7 @@ services:
       DEMO_USERNAME: demo
       DEMO_PASSWORD: "Ch@m3l30n@"
     ports:
-      - "127.0.0.1:${KABATU_WEB_HOST_PORT:-3000}:3000"
+      - "0.0.0.0:${KABATU_WEB_HOST_PORT:-3000}:3000"
     networks:
       - kabatu-net
 

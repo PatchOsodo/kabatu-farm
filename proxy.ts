@@ -10,8 +10,12 @@ import { canAccessModule, type ModuleKey } from "@/lib/authz";
 // exact — it's a route handler that performs its own auth (see
 // app/demo/route.ts) and needs to run BEFORE this middleware's normal
 // "no valid session -> redirect to /login" logic would otherwise catch
-// it first and never let the auto-login happen at all.
-const PUBLIC_EXACT_PATHS = ["/", "/demo"];
+// it first and never let the auto-login happen at all. /farm (added for
+// the mobile nav grouping work) is also exact — it's a picker page with
+// no data fetching of its own, just links into the four already-public
+// GUEST_READABLE_PREFIXES modules below, so it needs the same public
+// treatment as those without duplicating a prefix-match entry.
+const PUBLIC_EXACT_PATHS = ["/", "/demo", "/farm"];
 const PUBLIC_PREFIX_PATHS = ["/login"];
 
 // Guest-readable enterprise modules — no login required at all. Prefix
@@ -32,9 +36,9 @@ const PUBLIC_PREFIX_PATHS = ["/login"];
 // (still mock data), so no equivalent migration is needed for them today.
 const GUEST_READABLE_PREFIXES: { prefix: string; moduleKey: ModuleKey }[] = [
   { prefix: "/dairy", moduleKey: "dairy" },
-  { prefix: "/sheep", moduleKey: "sheep" },
-  { prefix: "/poultry", moduleKey: "poultry" },
-  { prefix: "/crops", moduleKey: "crops" },
+{ prefix: "/sheep", moduleKey: "sheep" },
+{ prefix: "/poultry", moduleKey: "poultry" },
+{ prefix: "/crops", moduleKey: "crops" },
 ];
 
 // Sensitive modules — authenticated AND role-checked via canAccessModule.
@@ -43,16 +47,16 @@ const GUEST_READABLE_PREFIXES: { prefix: string; moduleKey: ModuleKey }[] = [
 // imply they aren't authenticated, which isn't true).
 const ROLE_GATED_PREFIXES: { prefix: string; moduleKey: ModuleKey }[] = [
   { prefix: "/inventory", moduleKey: "inventory" },
-  { prefix: "/tasks", moduleKey: "tasks" },
-  { prefix: "/financials", moduleKey: "financials" },
+{ prefix: "/tasks", moduleKey: "tasks" },
+{ prefix: "/financials", moduleKey: "financials" },
 ];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isPublic =
-    PUBLIC_EXACT_PATHS.includes(pathname) ||
-    PUBLIC_PREFIX_PATHS.some((p) => pathname.startsWith(p));
+  PUBLIC_EXACT_PATHS.includes(pathname) ||
+  PUBLIC_PREFIX_PATHS.some((p) => pathname.startsWith(p));
   if (isPublic) return NextResponse.next();
 
   const guestReadable = GUEST_READABLE_PREFIXES.find((g) => pathname.startsWith(g.prefix));
