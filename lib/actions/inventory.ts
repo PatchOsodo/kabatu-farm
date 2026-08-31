@@ -27,6 +27,9 @@ export async function createStockMovementAction(
   if (!input.itemId || !input.type || !Number.isFinite(input.quantity) || input.quantity <= 0 || !input.date) {
     return { ok: false, error: "Fill in item, type, a positive quantity, and a date." };
   }
+  if (input.saleValueAmount !== undefined && (!Number.isFinite(input.saleValueAmount) || input.saleValueAmount <= 0)) {
+    return { ok: false, error: "Enter a valid positive sale value, or leave it blank." };
+  }
 
   try {
     await createStockMovement({ ...input, performedBy: userId });
@@ -36,6 +39,12 @@ export async function createStockMovementAction(
 
   revalidatePath("/inventory/movements");
   revalidatePath("/inventory");
+  // A sale_out movement against a qualifying produce item with a sale
+  // value now also writes a financial_transactions row — revalidate
+  // Financials so it doesn't show stale figures until an unrelated
+  // navigation happens to refresh it.
+  revalidatePath("/financials");
+  revalidatePath("/financials/transactions");
   return { ok: true };
 }
 

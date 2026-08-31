@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createPocketBaseClient } from "@/lib/pb";
-import type { ExpirationBatch, InventoryItem, StockMovement, StockMovementType, UserRole } from "@/types/farm";
+import { createTransaction } from "@/lib/data/financials";
+import type { Enterprise, ExpirationBatch, IncomeCategory, InventoryItem, StockMovement, StockMovementType, UserRole } from "@/types/farm";
 
 /** Server-side helper — builds a PocketBase client hydrated from the request's auth cookie. */
 async function getServerPb() {
@@ -82,9 +83,32 @@ export type StockMovementInput = {
   date: string;
   notes?: string;
   performedBy: string;
+  /**
+   * Only meaningful when type is "sale_out" and the item is a
+   * produce_output item whose linkedEnterprise maps to a known income
+   * category (see ENTERPRISE_SALE_CATEGORY below). When present and
+   * positive, this also writes a matching financial_transactions income
+   * row — closing the gap flagged in tracker.md's action log (#3) for
+   * milk/egg sales specifically. Not persisted on the stock_movements
+   * record itself (that collection's schema has no such field) —
+   * stripped out before the PocketBase write in createStockMovement.
+   */
+  saleValueAmount?: number;
 };
 
 const INFLOW_TYPES: StockMovementType[] = ["purchase_in", "production_in", "adjustment"];
+
+// Which enterprises' produce_output sales this module knows how to
+// categorize in Financials. Deliberately narrow — only dairy (milk) and
+// poultry (eggs) are in scope for this pass. Wool/meat sales are already
+// linked via a separate path (lib/data/sheep.ts's
+// createWoolHarvestRecord/createMeatOffFlockRecord); crops/other produce
+// sales are intentionally left as manual Financials entries until that's
+// explicitly decided too — not silently extended here.
+const ENTERPRISE_SALE_CATEGORY: Partial<Record<Enterprise, IncomeCategory>> = {
+  dairy: "milk_sale",
+  poultry: "egg_sale",
+};
 
 /**
  * Creates the ledger entry AND updates the item's running `currentQuantity`
@@ -99,16 +123,48 @@ const INFLOW_TYPES: StockMovementType[] = ["purchase_in", "production_in", "adju
  * number fields. Fixed in pb_migrations/015_inventory_zero_value_fix.js
  * (loosens `currentQuantity`/`reorderThreshold` to not-required) and
  * confirmed against a live instance after the fix.
+ *
+ * ALSO writes a financial_transactions income row when: type is
+ * "sale_out", the item is category "produce_output", its
+ * linkedEnterprise maps to a known income category above, and a
+ * positive saleValueAmount was provided. This is a THIRD write on top
+ * of the existing two-write caveat — same best-effort, not atomic,
+ * reasoning applies; a failure here doesn't roll back the stock
+ * movement or the quantity update. Identical shape to
+ * createWoolHarvestRecord/createMeatOffFlockRecord in lib/data/sheep.ts,
+ * applied there first.
  */
 export async function createStockMovement(input: StockMovementInput): Promise<StockMovement> {
   const pb = await getServerPb();
+  const { saleValueAmount, ...movementInput } = input;
 
-  const record = await pb.collection("stock_movements").create(input);
+  const record = await pb.collection("stock_movements").create(movementInput);
 
   const item = await pb.collection("inventory_items").getOne(input.itemId);
   const delta = INFLOW_TYPES.includes(input.type) ? input.quantity : -input.quantity;
   const nextQuantity = Math.max(0, (item.currentQuantity as number) + delta);
   await pb.collection("inventory_items").update(input.itemId, { currentQuantity: nextQuantity });
+
+  if (
+    input.type === "sale_out" &&
+    saleValueAmount !== undefined &&
+    saleValueAmount > 0 &&
+    (item.category as InventoryItem["category"]) === "produce_output"
+  ) {
+    const enterprise = item.linkedEnterprise as Enterprise | undefined;
+    const category = enterprise ? ENTERPRISE_SALE_CATEGORY[enterprise] : undefined;
+    if (category) {
+      await createTransaction({
+        type: "income",
+        enterprise,
+        category,
+        amountValue: saleValueAmount,
+        date: input.date,
+        description: `${item.name as string} sale — ${input.quantity} ${item.unit as string}${input.notes ? ` (${input.notes})` : ""}`,
+                              recordedBy: input.performedBy,
+      });
+    }
+  }
 
   return mapStockMovement(record);
 }
