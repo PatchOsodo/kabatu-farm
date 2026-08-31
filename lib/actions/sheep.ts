@@ -7,6 +7,7 @@ import {
   createMeatOffFlockRecord,
   createWoolHarvestRecord,
   getCurrentUserRole,
+  getCurrentUserId,
   updateSheepFlockPhoto,
   createSheepFlock,
   updateSheepFlock,
@@ -17,28 +18,38 @@ import { getHealthRecords } from "@/lib/data/health";
 import { getActiveQuarantine } from "@/lib/quarantine";
 
 export type SheepEventInput =
-  | { kind: "lambing"; flockId: string; date: string; lambsBornAlive: number; lambsStillborn: number }
-  | {
-      kind: "wool";
-      flockId: string;
-      date: string;
-      sheepShorn: number;
-      totalWeightKg: number;
-      saleValueAmount?: number;
-    }
-  | { kind: "meat"; flockId: string; date: string; animalsSold: number; saleValueAmount?: number };
+| { kind: "lambing"; flockId: string; date: string; lambsBornAlive: number; lambsStillborn: number }
+| {
+  kind: "wool";
+  flockId: string;
+  date: string;
+  sheepShorn: number;
+  totalWeightKg: number;
+  saleValueAmount?: number;
+}
+| { kind: "meat"; flockId: string; date: string; animalsSold: number; saleValueAmount?: number };
 
 /**
  * One action for all three record types, mirroring SheepEventsView's
  * single unified form (kind selects which collection it becomes) rather
  * than three separate actions for what the UI treats as one workflow.
+ *
+ * Now also fetches the current user id (previously only role was
+ * fetched) — wool/meat sales need it to attribute the linked
+ * financial_transactions row created inside createWoolHarvestRecord/
+ * createMeatOffFlockRecord (see lib/data/sheep.ts). Lambing records
+ * don't need it; still fetched up front for all three kinds since the
+ * session check should happen before any branch-specific validation.
  */
 export async function createSheepEventAction(
   input: SheepEventInput
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const role = await getCurrentUserRole();
+  const [role, userId] = await Promise.all([getCurrentUserRole(), getCurrentUserId()]);
   if (!canManageSheep(role)) {
     return { ok: false, error: "You don't have permission to log sheep events." };
+  }
+  if (!userId) {
+    return { ok: false, error: "Your session has expired — please log in again." };
   }
   if (!input.flockId || !input.date) {
     return { ok: false, error: "Fill in flock and date." };
@@ -68,6 +79,7 @@ export async function createSheepEventAction(
         sheepShorn: input.sheepShorn,
         totalWeightKg: input.totalWeightKg,
         saleValueAmount: input.saleValueAmount,
+        recordedBy: userId,
       });
     } else {
       if (!Number.isFinite(input.animalsSold) || input.animalsSold <= 0) {
@@ -92,6 +104,7 @@ export async function createSheepEventAction(
         date: input.date,
         animalsSold: input.animalsSold,
         saleValueAmount: input.saleValueAmount,
+        recordedBy: userId,
       });
     }
   } catch (err) {
@@ -100,6 +113,11 @@ export async function createSheepEventAction(
 
   revalidatePath("/sheep/events");
   revalidatePath("/sheep");
+  // A wool/meat entry with a sale value now writes a financial_transactions
+  // row too — revalidate Financials so it doesn't show stale figures
+  // until the next unrelated navigation happens to refresh it.
+  revalidatePath("/financials");
+  revalidatePath("/financials/transactions");
   return { ok: true };
 }
 
@@ -174,13 +192,13 @@ export async function updateSheepFlockAction(flockId: string, _prevState: unknow
   try {
     await updateSheepFlock(flockId, {
       flockName: String(formData.get("flockName")),
-      breed: String(formData.get("breed")),
-      purpose: formData.get("purpose") as SheepFlockInput["purpose"],
-      ramCount,
-      eweCount,
-      lambCount,
-      currentCount: ramCount + eweCount + lambCount,
-      notes: (formData.get("notes") as string) || undefined,
+                           breed: String(formData.get("breed")),
+                           purpose: formData.get("purpose") as SheepFlockInput["purpose"],
+                           ramCount,
+                           eweCount,
+                           lambCount,
+                           currentCount: ramCount + eweCount + lambCount,
+                           notes: (formData.get("notes") as string) || undefined,
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save this flock." };

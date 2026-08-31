@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { createPocketBaseClient } from "@/lib/pb";
+import { createTransaction } from "@/lib/data/financials";
 import type {
   LambingRecord,
   MeatOffFlockRecord,
@@ -136,16 +137,48 @@ export type WoolHarvestRecordInput = {
   sheepShorn: number;
   totalWeightKg: number;
   saleValueAmount?: number;
+  /** Only used to attribute the linked financial_transactions row when a sale value is provided — not stored on the wool_harvest_records row itself (WoolHarvestRecord has no recordedBy field). */
+  recordedBy: string;
 };
 
+/**
+ * Creates the wool_harvest_records row AND, when a sale value was
+ * actually entered, a matching financial_transactions income row —
+ * closing the gap flagged in tracker.md's action log (#3): wool/meat
+ * sales were captured with a real KES value here but never reached
+ * Financials, so the dashboard's sheep income figure silently excluded
+ * them. Same "two writes, one logical operation, not atomic" caveat as
+ * createHarvestRecord/createStockMovement/upsertMilkLog elsewhere in
+ * this codebase — if the second write fails, the wool record itself is
+ * still saved and returned; nothing here rolls that back.
+ *
+ * Deliberately conditional on saleValueAmount being a positive number —
+ * a shearing logged with no buyer/price yet (sale_value left blank)
+ * stays financially silent, matching "money actually changed hands" as
+ * the trigger for a ledger entry, not the physical shearing event alone.
+ */
 export async function createWoolHarvestRecord(input: WoolHarvestRecordInput): Promise<WoolHarvestRecord> {
   const pb = await getServerPb();
-  const { saleValueAmount, ...rest } = input;
+  const { saleValueAmount, recordedBy, ...rest } = input;
   const record = await pb.collection("wool_harvest_records").create({
     ...rest,
     saleValue: saleValueAmount !== undefined ? { amount: saleValueAmount, currency: "KES" } : undefined,
   });
-  return mapWoolHarvestRecord(record);
+  const wool = mapWoolHarvestRecord(record);
+
+  if (saleValueAmount !== undefined && saleValueAmount > 0) {
+    await createTransaction({
+      type: "income",
+      enterprise: "sheep",
+      category: "wool_sale",
+      amountValue: saleValueAmount,
+      date: input.shearingDate,
+      description: `Wool sale — ${input.sheepShorn} sheared, ${input.totalWeightKg} kg`,
+      recordedBy,
+    });
+  }
+
+  return wool;
 }
 
 export type MeatOffFlockRecordInput = {
@@ -153,21 +186,43 @@ export type MeatOffFlockRecordInput = {
   date: string;
   animalsSold: number;
   saleValueAmount?: number;
+  /** Only used to attribute the linked financial_transactions row — see WoolHarvestRecordInput's note. */
+  recordedBy: string;
 };
 
+/** Same sale-linking behavior as createWoolHarvestRecord above, for meat off-take — category "livestock_sale", matching the existing mock data's convention (lib/mock/sheep.ts's MOCK_MEAT_OFFTAKE). */
 export async function createMeatOffFlockRecord(input: MeatOffFlockRecordInput): Promise<MeatOffFlockRecord> {
   const pb = await getServerPb();
-  const { saleValueAmount, ...rest } = input;
+  const { saleValueAmount, recordedBy, ...rest } = input;
   const record = await pb.collection("meat_off_flock_records").create({
     ...rest,
     saleValue: saleValueAmount !== undefined ? { amount: saleValueAmount, currency: "KES" } : undefined,
   });
-  return mapMeatOffFlockRecord(record);
+  const meat = mapMeatOffFlockRecord(record);
+
+  if (saleValueAmount !== undefined && saleValueAmount > 0) {
+    await createTransaction({
+      type: "income",
+      enterprise: "sheep",
+      category: "livestock_sale",
+      amountValue: saleValueAmount,
+      date: input.date,
+      description: `Meat off-take — ${input.animalsSold} sold`,
+      recordedBy,
+    });
+  }
+
+  return meat;
 }
 
 export async function getCurrentUserRole(): Promise<UserRole | undefined> {
   const pb = await getServerPb();
   return pb.authStore.isValid ? (pb.authStore.model?.role as UserRole | undefined) : undefined;
+}
+
+export async function getCurrentUserId(): Promise<string | undefined> {
+  const pb = await getServerPb();
+  return pb.authStore.isValid ? (pb.authStore.model?.id as string | undefined) : undefined;
 }
 
 export async function updateSheepFlockPhoto(id: string, photoFile: File): Promise<SheepFlock> {
