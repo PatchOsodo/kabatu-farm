@@ -76,7 +76,7 @@ export default async function DashboardPage() {
         return (
           <article
           key={e.enterprise}
-          className="relative bg-parchment-100/60 border border-line rounded p-5 flex flex-col gap-4"
+          className="relative bg-parchment-100/60 border border-line rounded p-5 flex flex-col gap-3"
           >
           <span className="absolute top-0 left-5 -translate-y-1/2 h-1 w-8 bg-gold-500 rounded-full" />
 
@@ -87,30 +87,32 @@ export default async function DashboardPage() {
           <p className="text-xs text-ink-500 mt-0.5">{e.headline}</p>
           </div>
 
-          <dl className="text-xs font-mono-data space-y-1.5">
-          <div className="flex justify-between">
-          <dt className="text-ink-500">Income (MTD)</dt>
-          <dd className="text-ink-900">{money(e.monthIncome.amount)}</dd>
-          </div>
-          <div className="flex justify-between">
-          <dt className="text-ink-500">Expense (MTD)</dt>
-          <dd className="text-ink-900">{money(e.monthExpense.amount)}</dd>
-          </div>
-          <div className="flex justify-between border-t border-line pt-1.5 mt-1.5">
-          <dt className="text-ink-500">Net</dt>
-          <dd className={net >= 0 ? "text-forest-700" : "text-danger"}>
-          {net >= 0 ? "+" : ""}
-          {money(net)}
-          </dd>
-          </div>
-          </dl>
-
-          {e.openAlerts > 0 && (
-            <p className="text-[11px] text-danger">
-            {e.openAlerts} alert{e.openAlerts === 1 ? "" : "s"} needs attention
+          {/* Net shown first and largest — the answer, not a supporting
+            figure, per the reviewer's hierarchy note: income/expense
+            are context for the net, not co-equal with it. */}
+            <p className={`font-display text-2xl ${net >= 0 ? "text-forest-700" : "text-danger"}`}>
+            {net >= 0 ? "+" : ""}
+            {money(net)}
+            <span className="font-body text-[11px] text-ink-500 ml-1.5">net this month</span>
             </p>
-          )}
-          </article>
+
+            <dl className="text-[11px] font-mono-data text-ink-500 flex gap-4">
+            <div className="flex items-baseline gap-1">
+            <dt>Income</dt>
+            <dd className="text-ink-700">{money(e.monthIncome.amount)}</dd>
+            </div>
+            <div className="flex items-baseline gap-1">
+            <dt>Expenses</dt>
+            <dd className="text-ink-700">{money(e.monthExpense.amount)}</dd>
+            </div>
+            </dl>
+
+            {e.openAlerts > 0 && (
+              <p className="text-[11px] text-danger">
+              {e.openAlerts} alert{e.openAlerts === 1 ? "" : "s"} needs attention
+              </p>
+            )}
+            </article>
         );
       })}
       </div>
