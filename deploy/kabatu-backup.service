@@ -8,6 +8,15 @@
 # Check status / logs:
 #   systemctl list-timers kabatu-backup.timer
 #   journalctl -u kabatu-backup.service
+#
+# PATH FIX (this update): ExecStart previously pointed at
+# /opt/kabatu-farm/deploy/kabatu-backup.sh, a path that doesn't match the
+# Docker Compose deployment's actual project location
+# (/home/Docker/kabatu-farm — see README.md and kabatu-backup.sh's own
+# comments). Corrected below. User=kabatu is UNVERIFIED — confirm this
+# matches whichever Linux account actually owns/runs `docker compose` on the
+# VPS (it needs read access to /home/Docker/kabatu-farm/pb_data); change it
+# if it doesn't.
 
 [Unit]
 Description=Kabatu Farm - daily PocketBase backup to Google Drive
@@ -15,4 +24,4 @@ Description=Kabatu Farm - daily PocketBase backup to Google Drive
 [Service]
 Type=oneshot
 User=kabatu
-ExecStart=/opt/kabatu-farm/deploy/kabatu-backup.sh
+ExecStart=/home/Docker/kabatu-farm/deploy/kabatu-backup.sh
