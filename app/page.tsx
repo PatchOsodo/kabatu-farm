@@ -3,7 +3,16 @@ import { LinkButton } from "@/components/ui/Button";
 import { ENTERPRISE_LABEL } from "@/lib/modules";
 import { getSessionUserName, getSessionRole } from "@/lib/session";
 import { getFarmDashboardData } from "@/lib/data/dashboard";
-import { canManageMilkLogs, canManagePoultry, canManageFinancials, canCreateTask } from "@/lib/authz";
+import {
+  canManageMilkLogs,
+  canManagePoultry,
+  canManageFinancials,
+  canCreateTask,
+  canManageCattle,
+  canManageSheep,
+  canManageLandParcels,
+} from "@/lib/authz";
+import type { Enterprise, UserRole } from "@/types/farm";
 
 function money(amount: number) {
   return `KES ${amount.toLocaleString("en-KE")}`;
@@ -15,6 +24,22 @@ interface QuickAction {
   href: string;
   glyph: string;
 }
+
+// Per-enterprise "add a first record" destination for the empty-state
+// card — mirrors each module's own /new route and reuses the exact same
+// permission check that route itself already enforces (see
+// app/dairy/new/page.tsx, app/sheep/new/page.tsx,
+// app/poultry/new/page.tsx, app/crops/new/page.tsx), so this is UI
+// convenience only, not a second access layer.
+const ADD_CONFIG: Record
+Enterprise,
+{ href: string; label: string; canAdd: (role: UserRole | undefined) => boolean }
+> = {
+  dairy: { href: "/dairy/new", label: "cattle", canAdd: canManageCattle },
+  sheep: { href: "/sheep/new", label: "flock", canAdd: canManageSheep },
+  poultry: { href: "/poultry/new", label: "flock", canAdd: canManagePoultry },
+  crops: { href: "/crops/new", label: "plot", canAdd: canManageLandParcels },
+};
 
 export default async function DashboardPage() {
   const data = await getFarmDashboardData();
@@ -73,6 +98,9 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
       {data.enterprises.map((e) => {
         const net = e.monthIncome.amount - e.monthExpense.amount;
+        const addConfig = ADD_CONFIG[e.enterprise];
+        const showEmptyState = !e.hasRecords;
+
         return (
           <article
           key={e.enterprise}
@@ -87,32 +115,50 @@ export default async function DashboardPage() {
           <p className="text-xs text-ink-500 mt-0.5">{e.headline}</p>
           </div>
 
-          {/* Net shown first and largest — the answer, not a supporting
-            figure, per the reviewer's hierarchy note: income/expense
-            are context for the net, not co-equal with it. */}
-            <p className={`font-display text-2xl ${net >= 0 ? "text-forest-700" : "text-danger"}`}>
-            {net >= 0 ? "+" : ""}
-            {money(net)}
-            <span className="font-body text-[11px] text-ink-500 ml-1.5">net this month</span>
+          {showEmptyState ? (
+            // True empty state — zero underlying records, so a
+            // KES 0 net is genuinely accurate (nothing to show
+            // yet), not a figure hiding un-recorded activity.
+            <div className="flex flex-col gap-2">
+            <p className="text-sm text-ink-500">
+            No {ENTERPRISE_LABEL[e.enterprise].toLowerCase()} activity yet.
             </p>
-
-            <dl className="text-[11px] font-mono-data text-ink-500 flex gap-4">
-            <div className="flex items-baseline gap-1">
-            <dt>Income</dt>
-            <dd className="text-ink-700">{money(e.monthIncome.amount)}</dd>
-            </div>
-            <div className="flex items-baseline gap-1">
-            <dt>Expenses</dt>
-            <dd className="text-ink-700">{money(e.monthExpense.amount)}</dd>
-            </div>
-            </dl>
-
-            {e.openAlerts > 0 && (
-              <p className="text-[11px] text-danger">
-              {e.openAlerts} alert{e.openAlerts === 1 ? "" : "s"} needs attention
-              </p>
+            {addConfig.canAdd(role) && (
+              <LinkButton href={addConfig.href} variant="secondary" size="sm">
+              + Add {addConfig.label}
+              </LinkButton>
             )}
-            </article>
+            </div>
+          ) : (
+            <>
+            {/* Net shown first and largest — the answer, not a supporting
+              figure, per the reviewer's hierarchy note: income/expense
+              are context for the net, not co-equal with it. */}
+              <p className={`font-display text-2xl ${net >= 0 ? "text-forest-700" : "text-danger"}`}>
+              {net >= 0 ? "+" : ""}
+              {money(net)}
+              <span className="font-body text-[11px] text-ink-500 ml-1.5">net this month</span>
+              </p>
+
+              <dl className="text-[11px] font-mono-data text-ink-500 flex gap-4">
+              <div className="flex items-baseline gap-1">
+              <dt>Income</dt>
+              <dd className="text-ink-700">{money(e.monthIncome.amount)}</dd>
+              </div>
+              <div className="flex items-baseline gap-1">
+              <dt>Expenses</dt>
+              <dd className="text-ink-700">{money(e.monthExpense.amount)}</dd>
+              </div>
+              </dl>
+              </>
+          )}
+
+          {e.openAlerts > 0 && (
+            <p className="text-[11px] text-danger">
+            {e.openAlerts} alert{e.openAlerts === 1 ? "" : "s"} needs attention
+            </p>
+          )}
+          </article>
         );
       })}
       </div>
