@@ -153,7 +153,12 @@ export async function createStockMovement(input: StockMovementInput): Promise<St
   ) {
     const enterprise = item.linkedEnterprise as Enterprise | undefined;
     const category = enterprise ? ENTERPRISE_SALE_CATEGORY[enterprise] : undefined;
-    if (category) {
+    // Both must be defined together — category is only ever derived
+    // from a defined enterprise (see the line above), but TypeScript
+    // can't infer that correlation across the two separate optional
+    // values, so both are checked explicitly here rather than relying
+    // on category's presence alone to imply enterprise's.
+    if (enterprise && category) {
       await createTransaction({
         type: "income",
         enterprise,
