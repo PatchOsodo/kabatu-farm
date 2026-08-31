@@ -25,16 +25,19 @@ interface QuickAction {
   glyph: string;
 }
 
+interface AddConfigEntry {
+  href: string;
+  label: string;
+  canAdd: (role: UserRole | undefined) => boolean;
+}
+
 // Per-enterprise "add a first record" destination for the empty-state
 // card — mirrors each module's own /new route and reuses the exact same
 // permission check that route itself already enforces (see
 // app/dairy/new/page.tsx, app/sheep/new/page.tsx,
 // app/poultry/new/page.tsx, app/crops/new/page.tsx), so this is UI
 // convenience only, not a second access layer.
-const ADD_CONFIG: Record
-Enterprise,
-{ href: string; label: string; canAdd: (role: UserRole | undefined) => boolean }
-> = {
+const ADD_CONFIG: Record<Enterprise, AddConfigEntry> = {
   dairy: { href: "/dairy/new", label: "cattle", canAdd: canManageCattle },
   sheep: { href: "/sheep/new", label: "flock", canAdd: canManageSheep },
   poultry: { href: "/poultry/new", label: "flock", canAdd: canManagePoultry },
