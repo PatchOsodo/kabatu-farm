@@ -105,7 +105,13 @@ export interface CalvingRecord extends Timestamps {
   assistedBy?: UUID; // User id
 }
 
-/** One row per cow per milking session (most farms milk 2x/day) */
+/**
+ * One row per cow per milking session (most farms milk 2x/day).
+ * fatPercent/proteinPercent/safetyStatus (added for Kenya's QBP —
+ * Quality-Based Milk Payment — rollout) are all optional: they're
+ * typically attached to a periodic lab/collection test, not every
+ * single milking, so most rows will have none of the three set.
+ */
 export interface MilkLog {
   id: UUID;
   cattleId: UUID;
@@ -114,6 +120,9 @@ export interface MilkLog {
   liters: number;
   recordedBy: UUID; // User id
   createdAt: ISODateTime;
+  fatPercent?: number;
+  proteinPercent?: number;
+  safetyStatus?: "passed" | "failed";
 }
 
 export type LactationStage = "early" | "mid" | "late" | "dry";

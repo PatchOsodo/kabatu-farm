@@ -29,6 +29,9 @@ function mapMilkLog(record: Record<string, unknown>): MilkLog {
     liters: record.liters as number,
     recordedBy: record.recordedBy as string,
     createdAt: record.created as string,
+    fatPercent: (record.fatPercent as number) ?? undefined,
+    proteinPercent: (record.proteinPercent as number) ?? undefined,
+    safetyStatus: (record.safetyStatus as MilkLog["safetyStatus"]) || undefined,
   };
 }
 
@@ -110,6 +113,14 @@ export type MilkLogInput = {
   session: MilkLog["session"];
   liters: number;
   recordedBy: string;
+  /**
+   * QBP composition fields (2026-08-31 addition) — all optional. Most
+   * milk log entries won't carry these; they're attached when a
+   * collection/lab test result is actually available for that entry.
+   */
+  fatPercent?: number;
+  proteinPercent?: number;
+  safetyStatus?: MilkLog["safetyStatus"];
 };
 
 /**
@@ -119,6 +130,12 @@ export type MilkLogInput = {
  * if it exists, creates if it doesn't. This mirrors createStockMovement's
  * "one logical operation, best-effort not atomic" note from the inventory
  * module: the lookup-then-write is two round trips, not a transaction.
+ *
+ * Composition fields (fatPercent/proteinPercent/safetyStatus) are passed
+ * through on both the create and update path when present in the input —
+ * on update, only fields actually included in `input` are sent, so an
+ * update that doesn't touch composition data won't accidentally clear a
+ * previously-recorded lab result.
  */
 export async function upsertMilkLog(input: MilkLogInput): Promise<MilkLog> {
   const pb = await getServerPb();
@@ -138,10 +155,15 @@ export async function upsertMilkLog(input: MilkLogInput): Promise<MilkLog> {
     filter: `cattleId = "${input.cattleId}" && date >= "${dayStart}" && date < "${dayEnd}" && session = "${input.session}"`,
   });
 
+  const compositionFields: Partial<Pick<MilkLogInput, "fatPercent" | "proteinPercent" | "safetyStatus">> = {};
+  if (input.fatPercent !== undefined) compositionFields.fatPercent = input.fatPercent;
+  if (input.proteinPercent !== undefined) compositionFields.proteinPercent = input.proteinPercent;
+  if (input.safetyStatus !== undefined) compositionFields.safetyStatus = input.safetyStatus;
+
   if (existing.length > 0) {
     const record = await pb
-      .collection("milk_logs")
-      .update(existing[0].id, { liters: input.liters, recordedBy: input.recordedBy });
+    .collection("milk_logs")
+    .update(existing[0].id, { liters: input.liters, recordedBy: input.recordedBy, ...compositionFields });
     return record as unknown as MilkLog;
   }
 
@@ -204,8 +226,8 @@ export async function createCalvingRecord(
   return { calving, lactation: mapLactationCycle(lactationRecord) };
 }
 
-export type LactationUpdateInput = Partial<
-  Pick<LactationCycle, "stage" | "endDate" | "expectedDryOffDate" | "peakYieldLiters">
+export type LactationUpdateInput = Partial
+Pick<LactationCycle, "stage" | "endDate" | "expectedDryOffDate" | "peakYieldLiters">
 >;
 
 export async function updateLactationCycle(id: string, input: LactationUpdateInput): Promise<LactationCycle> {
