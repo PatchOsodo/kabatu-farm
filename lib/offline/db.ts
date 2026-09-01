@@ -39,6 +39,12 @@ export interface LactatingCowSnapshot {
  * PocketBase updated timestamp) — both needed at sync time to detect
  * whether someone else changed this exact record while this device was
  * offline, see sync.ts.
+ *
+ * fatPercent/proteinPercent/safetyStatus (QBP composition fields) added
+ * so the entry form can pre-fill an existing lab result on reload —
+ * previously only `liters` was carried here, so composition data
+ * entered in one session appeared to vanish (was actually just never
+ * fetched back) after a page reload.
  */
 export interface KnownMilkValue {
   cattleId: string;
@@ -47,6 +53,9 @@ export interface KnownMilkValue {
   liters: number;
   pbId?: string;
   updated?: string;
+  fatPercent?: number;
+  proteinPercent?: number;
+  safetyStatus?: "passed" | "failed";
 }
 
 export interface Snapshot {

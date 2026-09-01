@@ -96,9 +96,13 @@ export function MilkQuickEntry({
   const [isOnline, setIsOnline] = useState(true);
 
   // Per-row: is the "add lab result" panel open, and its draft values.
-  // Keyed by cattleId only (not date/session) — deliberately simple:
-  // opening the panel for a cow just shows it for whatever date/session
-  // is currently selected, same as the liters field itself.
+  // compositionOpen is keyed by cattleId only — purely a UI show/hide
+  // toggle, fine to persist across date/session switches. compositionDrafts
+  // is keyed by the SAME draftKey() (cattleId+date+session) the liters
+  // draft already uses — a fix from the original version of this
+  // component, which keyed composition drafts by cattleId alone and could
+  // show one date's lab result while the person was actually editing a
+  // different date's row after switching the date picker.
   const [compositionOpen, setCompositionOpen] = useState<Record<string, boolean>>({});
   const [compositionDrafts, setCompositionDrafts] = useState<Record<string, CompositionDraft>>({});
 
@@ -170,6 +174,9 @@ export function MilkQuickEntry({
           liters: l.liters,
           pbId: (l as unknown as { id: string }).id,
                                                          updated: l.updated,
+                                                         fatPercent: l.fatPercent,
+                                                         proteinPercent: l.proteinPercent,
+                                                         safetyStatus: l.safetyStatus,
         }));
 
         if (cancelled) return;
@@ -193,7 +200,15 @@ export function MilkQuickEntry({
           .map((c) => ({ id: c.id, tagId: c.tagId, name: c.name ?? c.tagId }));
           setLactatingCows(cows);
           setKnownValues(
-            initialMilkLogs.map((l) => ({ cattleId: l.cattleId, date: l.date, session: l.session, liters: l.liters }))
+            initialMilkLogs.map((l) => ({
+              cattleId: l.cattleId,
+              date: l.date,
+              session: l.session,
+              liters: l.liters,
+              fatPercent: l.fatPercent,
+              proteinPercent: l.proteinPercent,
+              safetyStatus: l.safetyStatus,
+            }))
           );
           setLoadState("online");
         } else {
@@ -245,12 +260,29 @@ export function MilkQuickEntry({
       setCompositionOpen((prev) => ({ ...prev, [cattleId]: !prev[cattleId] }));
     }
 
+    /**
+     * Pre-fills from the server's known composition for THIS cow's row at
+     * the currently selected date/session, unless the person already has
+     * an unsaved local edit for that exact key. Uses draftKey() (not just
+     * cattleId) so switching the date/session picker correctly shows that
+     * date's own lab result instead of whatever was last typed for a
+     * different date.
+     */
     function compositionFor(cattleId: string): CompositionDraft {
-      return compositionDrafts[cattleId] ?? EMPTY_COMPOSITION;
+      const k = draftKey(cattleId);
+      if (k in compositionDrafts) return compositionDrafts[k];
+      const known = findKnown(cattleId);
+      if (!known) return EMPTY_COMPOSITION;
+      return {
+        fatPercent: known.fatPercent !== undefined ? String(known.fatPercent) : "",
+        proteinPercent: known.proteinPercent !== undefined ? String(known.proteinPercent) : "",
+        safetyStatus: known.safetyStatus ?? "",
+      };
     }
 
     function setCompositionField(cattleId: string, patch: Partial<CompositionDraft>) {
-      setCompositionDrafts((prev) => ({ ...prev, [cattleId]: { ...compositionFor(cattleId), ...patch } }));
+      const k = draftKey(cattleId);
+      setCompositionDrafts((prev) => ({ ...prev, [k]: { ...compositionFor(cattleId), ...patch } }));
     }
 
     /** Parses this row's composition drafts into the optional fields upsertMilkLog/enqueueWrite expect — undefined for anything left blank, not 0 or "". */
@@ -316,7 +348,17 @@ export function MilkQuickEntry({
         const fresh = await pb.collection("milk_logs").getFirstListItem(filter);
         setKnownValues((prev) => [
           ...prev.filter((v) => !(v.cattleId === cattleId && v.date === date && v.session === session)),
-                       { cattleId, date, session, liters: effectiveLiters, pbId: fresh.id, updated: (fresh as unknown as { updated: string }).updated },
+                       {
+                         cattleId,
+                         date,
+                         session,
+                         liters: effectiveLiters,
+                         pbId: fresh.id,
+                         updated: (fresh as unknown as { updated: string }).updated,
+                       fatPercent: composition.fatPercent,
+                       proteinPercent: composition.proteinPercent,
+                       safetyStatus: composition.safetyStatus,
+                       },
         ]);
         setRowStates((prev) => ({ ...prev, [cattleId]: "saved" }));
         setTimeout(() => setRowStates((prev) => ({ ...prev, [cattleId]: "idle" })), 1200);
@@ -558,7 +600,7 @@ export function MilkQuickEntry({
             max="100"
             value={composition.fatPercent}
             onChange={(e) => setCompositionField(c.id, { fatPercent: e.target.value })}
-            onBlur={(e) => commit(c.id, currentDraft(c.id))}
+            onBlur={() => commit(c.id, currentDraft(c.id))}
             className="w-20 text-sm px-2 py-1 rounded border border-line bg-white focus:outline-none focus:border-gold-500"
             />
             </label>
@@ -572,7 +614,7 @@ export function MilkQuickEntry({
             max="100"
             value={composition.proteinPercent}
             onChange={(e) => setCompositionField(c.id, { proteinPercent: e.target.value })}
-            onBlur={(e) => commit(c.id, currentDraft(c.id))}
+            onBlur={() => commit(c.id, currentDraft(c.id))}
             className="w-20 text-sm px-2 py-1 rounded border border-line bg-white focus:outline-none focus:border-gold-500"
             />
             </label>
