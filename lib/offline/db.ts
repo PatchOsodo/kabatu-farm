@@ -84,6 +84,12 @@ export type QueueStatus = "pending" | "syncing" | "conflict" | "failed";
  * value, or "none" for a brand new entry. Sync compares this against
  * what the server actually has at flush time to detect whether someone
  * else changed it in the meantime (see sync.ts's conflict check).
+ *
+ * fatPercent/proteinPercent/safetyStatus (QBP composition fields,
+ * 2026-08-31) are carried through the offline queue same as liters —
+ * without this, a lab result attached while offline would silently be
+ * lost on sync, since flushQueue's create()/update() calls only send
+ * what's in the QueuedWrite record.
  */
 export interface QueuedWrite {
   queueId: string; // client-generated, stable across retries
@@ -97,6 +103,9 @@ export interface QueuedWrite {
   status: QueueStatus;
   recordedBy: string;
   conflictServerValue?: number; // populated only when status === "conflict"
+  fatPercent?: number;
+  proteinPercent?: number;
+  safetyStatus?: "passed" | "failed";
 }
 
 export async function enqueueWrite(write: Omit<QueuedWrite, "status">): Promise<void> {

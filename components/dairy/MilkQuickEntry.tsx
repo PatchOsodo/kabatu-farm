@@ -68,6 +68,15 @@ interface MilkQuickEntryProps {
 type LoadState = "loading" | "online" | "offline-cached" | "unavailable";
 type RowSaveState = "idle" | "saving" | "saved" | "queued" | "error";
 
+/** Draft shape for a row's optional QBP lab-result panel — kept separate from the liters draft since it's shown/hidden per row, not always-on. */
+interface CompositionDraft {
+  fatPercent: string;
+  proteinPercent: string;
+  safetyStatus: "" | "passed" | "failed";
+}
+
+const EMPTY_COMPOSITION: CompositionDraft = { fatPercent: "", proteinPercent: "", safetyStatus: "" };
+
 export function MilkQuickEntry({
   cattle: initialCattle,
   milkLogs: initialMilkLogs,
@@ -85,6 +94,13 @@ export function MilkQuickEntry({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [queue, setQueue] = useState<QueuedWrite[]>([]);
   const [isOnline, setIsOnline] = useState(true);
+
+  // Per-row: is the "add lab result" panel open, and its draft values.
+  // Keyed by cattleId only (not date/session) — deliberately simple:
+  // opening the panel for a cow just shows it for whatever date/session
+  // is currently selected, same as the liters field itself.
+  const [compositionOpen, setCompositionOpen] = useState<Record<string, boolean>>({});
+  const [compositionDrafts, setCompositionDrafts] = useState<Record<string, CompositionDraft>>({});
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -131,8 +147,8 @@ export function MilkQuickEntry({
         const pb = createPocketBaseClient();
         const [cattleRecords, cycleRecords, milkRecords] = await Promise.all([
           pb.collection("cattle").getFullList(),
-          pb.collection("lactation_cycles").getFullList(),
-          pb.collection("milk_logs").getFullList({ filter: dayRangeFilter(toISODate(new Date())) }),
+                                                                             pb.collection("lactation_cycles").getFullList(),
+                                                                             pb.collection("milk_logs").getFullList({ filter: dayRangeFilter(toISODate(new Date())) }),
         ]);
 
         const cattleList = cattleRecords as unknown as Cattle[];
@@ -141,11 +157,11 @@ export function MilkQuickEntry({
 
         const activeIds = getActiveLactationCattleIds(cycles);
         const cows: LactatingCowSnapshot[] = cattleList
-          .filter((c) => activeIds.has(c.id))
-          .map((c) => {
-            const q = getActiveQuarantine(healthRecords, c.id);
-            return { id: c.id, tagId: c.tagId, name: c.name ?? c.tagId, quarantinedUntil: q?.quarantineUntilDate };
-          });
+        .filter((c) => activeIds.has(c.id))
+        .map((c) => {
+          const q = getActiveQuarantine(healthRecords, c.id);
+          return { id: c.id, tagId: c.tagId, name: c.name ?? c.tagId, quarantinedUntil: q?.quarantineUntilDate };
+        });
 
         const known: KnownMilkValue[] = logs.map((l) => ({
           cattleId: l.cattleId,
@@ -153,7 +169,7 @@ export function MilkQuickEntry({
           session: l.session,
           liters: l.liters,
           pbId: (l as unknown as { id: string }).id,
-          updated: l.updated,
+                                                         updated: l.updated,
         }));
 
         if (cancelled) return;
@@ -173,8 +189,8 @@ export function MilkQuickEntry({
         } else if (initialCattle.length > 0) {
           const activeIds = getActiveLactationCattleIds(initialLactationCycles);
           const cows = initialCattle
-            .filter((c) => activeIds.has(c.id))
-            .map((c) => ({ id: c.id, tagId: c.tagId, name: c.name ?? c.tagId }));
+          .filter((c) => activeIds.has(c.id))
+          .map((c) => ({ id: c.id, tagId: c.tagId, name: c.name ?? c.tagId }));
           setLactatingCows(cows);
           setKnownValues(
             initialMilkLogs.map((l) => ({ cattleId: l.cattleId, date: l.date, session: l.session, liters: l.liters }))
@@ -201,283 +217,393 @@ export function MilkQuickEntry({
     if (isOnline) attemptSync();
   }, [isOnline, attemptSync]);
 
-  const quarantineMap = useMemo(() => {
-    const map = new Map<string, HealthRecord>();
-    for (const c of lactatingCows) {
-      const active = getActiveQuarantine(healthRecords, c.id);
-      if (active) map.set(c.id, active);
+    const quarantineMap = useMemo(() => {
+      const map = new Map<string, HealthRecord>();
+      for (const c of lactatingCows) {
+        const active = getActiveQuarantine(healthRecords, c.id);
+        if (active) map.set(c.id, active);
+      }
+      return map;
+    }, [lactatingCows, healthRecords]);
+
+    function findKnown(cattleId: string): KnownMilkValue | undefined {
+      return knownValues.find((k) => k.cattleId === cattleId && k.date === date && k.session === session);
     }
-    return map;
-  }, [lactatingCows, healthRecords]);
 
-  function findKnown(cattleId: string): KnownMilkValue | undefined {
-    return knownValues.find((k) => k.cattleId === cattleId && k.date === date && k.session === session);
-  }
+    function draftKey(cattleId: string) {
+      return `${cattleId}__${date}__${session}`;
+    }
 
-  function draftKey(cattleId: string) {
-    return `${cattleId}__${date}__${session}`;
-  }
+    function currentDraft(cattleId: string): string {
+      const k = draftKey(cattleId);
+      if (k in drafts) return drafts[k];
+      const known = findKnown(cattleId);
+      return known && known.liters > 0 ? String(known.liters) : "";
+    }
 
-  function currentDraft(cattleId: string): string {
-    const k = draftKey(cattleId);
-    if (k in drafts) return drafts[k];
-    const known = findKnown(cattleId);
-    return known && known.liters > 0 ? String(known.liters) : "";
-  }
+    function toggleComposition(cattleId: string) {
+      setCompositionOpen((prev) => ({ ...prev, [cattleId]: !prev[cattleId] }));
+    }
 
-  async function commit(cattleId: string, raw: string) {
-    const k = draftKey(cattleId);
-    setDrafts((prev) => ({ ...prev, [k]: raw }));
+    function compositionFor(cattleId: string): CompositionDraft {
+      return compositionDrafts[cattleId] ?? EMPTY_COMPOSITION;
+    }
 
-    const parsed = parseFloat(raw);
-    const liters = Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 10) / 10 : undefined;
-    const known = findKnown(cattleId);
-    if (liters === undefined || liters === (known?.liters ?? 0)) return;
+    function setCompositionField(cattleId: string, patch: Partial<CompositionDraft>) {
+      setCompositionDrafts((prev) => ({ ...prev, [cattleId]: { ...compositionFor(cattleId), ...patch } }));
+    }
 
-    setRowStates((prev) => ({ ...prev, [cattleId]: "saving" }));
+    /** Parses this row's composition drafts into the optional fields upsertMilkLog/enqueueWrite expect — undefined for anything left blank, not 0 or "". */
+    function parsedComposition(cattleId: string) {
+      const draft = compositionFor(cattleId);
+      const fatPercent = draft.fatPercent.trim() ? parseFloat(draft.fatPercent) : undefined;
+      const proteinPercent = draft.proteinPercent.trim() ? parseFloat(draft.proteinPercent) : undefined;
+      const safetyStatus = draft.safetyStatus || undefined;
+      return {
+        fatPercent: fatPercent !== undefined && Number.isFinite(fatPercent) ? fatPercent : undefined,
+        proteinPercent: proteinPercent !== undefined && Number.isFinite(proteinPercent) ? proteinPercent : undefined,
+        safetyStatus,
+      };
+    }
 
-    const baseline = known ? { liters: known.liters, pbId: known.pbId, updated: known.updated } : null;
+    async function commit(cattleId: string, raw: string) {
+      const k = draftKey(cattleId);
+      setDrafts((prev) => ({ ...prev, [k]: raw }));
 
-    try {
-      const pb = createPocketBaseClient();
-      const filter = `cattleId = "${cattleId}" && ${dayRangeFilter(date)} && session = "${session}"`;
-      let existing: { id: string; updated: string } | null = null;
+      const parsed = parseFloat(raw);
+      const liters = Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 10) / 10 : undefined;
+      const known = findKnown(cattleId);
+      const composition = parsedComposition(cattleId);
+      const hasComposition =
+      composition.fatPercent !== undefined || composition.proteinPercent !== undefined || composition.safetyStatus !== undefined;
+
+      // Commit fires on blur even when only a composition field changed and
+      // liters is untouched/unchanged — a lab result attached to an already-
+      // logged session should still save, not require re-typing the liters
+      // value to trigger a write.
+      if ((liters === undefined || liters === (known?.liters ?? 0)) && !hasComposition) return;
+      const effectiveLiters = liters ?? known?.liters ?? 0;
+
+      setRowStates((prev) => ({ ...prev, [cattleId]: "saving" }));
+
+      const baseline = known ? { liters: known.liters, pbId: known.pbId, updated: known.updated } : null;
+
       try {
-        existing = await pb.collection("milk_logs").getFirstListItem(filter);
-      } catch {
-        existing = null;
-      }
+        const pb = createPocketBaseClient();
+        const filter = `cattleId = "${cattleId}" && ${dayRangeFilter(date)} && session = "${session}"`;
+        let existing: { id: string; updated: string } | null = null;
+        try {
+          existing = await pb.collection("milk_logs").getFirstListItem(filter);
+        } catch {
+          existing = null;
+        }
 
-      if (existing) {
-        await pb.collection("milk_logs").update(existing.id, { liters });
-      } else {
-        await pb.collection("milk_logs").create({ cattleId, date, session, liters, recordedBy: currentUserId });
-      }
-
-      // create()/update() responses don't include `updated` (confirmed
-      // against a real server — PocketBase v0.23 only returns it if the
-      // collection has an explicit autodate field AND it's requested;
-      // see pb_migrations/021_milk_logs_autodate_fields.js). Re-fetch to
-      // get the real timestamp for the next baseline comparison —
-      // storing a stale/missing one here would silently break future
-      // conflict detection for this exact row.
-      const fresh = await pb.collection("milk_logs").getFirstListItem(filter);
-      setKnownValues((prev) => [
-        ...prev.filter((v) => !(v.cattleId === cattleId && v.date === date && v.session === session)),
-        { cattleId, date, session, liters, pbId: fresh.id, updated: (fresh as unknown as { updated: string }).updated },
-      ]);
-      setRowStates((prev) => ({ ...prev, [cattleId]: "saved" }));
-      setTimeout(() => setRowStates((prev) => ({ ...prev, [cattleId]: "idle" })), 1200);
-    } catch {
-      await enqueueWrite({
-        queueId: `${cattleId}__${date}__${session}__${Date.now()}`,
-        cattleId,
-        cattleName: lactatingCows.find((c) => c.id === cattleId)?.name ?? cattleId,
-        date,
-        session,
-        liters,
-        baseline,
-        queuedAt: new Date().toISOString(),
-        recordedBy: currentUserId,
-      });
-      setRowStates((prev) => ({ ...prev, [cattleId]: "queued" }));
-      await refreshQueue();
-    }
-  }
-
-  async function resolveConflictKeepServer(item: QueuedWrite) {
-    await removeQueuedWrite(item.queueId);
-    await refreshQueue();
-  }
-
-  async function resolveConflictOverwrite(item: QueuedWrite) {
-    try {
-      const pb = createPocketBaseClient();
-      const filter = `cattleId = "${item.cattleId}" && ${dayRangeFilter(item.date)} && session = "${item.session}"`;
-      const existing = await pb.collection("milk_logs").getFirstListItem(filter).catch(() => null);
-      if (existing) {
-        await pb.collection("milk_logs").update(existing.id, { liters: item.liters });
-      } else {
-        await pb
+        if (existing) {
+          await pb.collection("milk_logs").update(existing.id, { liters: effectiveLiters, ...composition });
+        } else {
+          await pb
           .collection("milk_logs")
-          .create({ cattleId: item.cattleId, date: item.date, session: item.session, liters: item.liters, recordedBy: item.recordedBy });
+          .create({ cattleId, date, session, liters: effectiveLiters, recordedBy: currentUserId, ...composition });
+        }
+
+        // create()/update() responses don't include `updated` (confirmed
+        // against a real server — PocketBase v0.23 only returns it if the
+        // collection has an explicit autodate field AND it's requested;
+        // see pb_migrations/021_milk_logs_autodate_fields.js). Re-fetch to
+        // get the real timestamp for the next baseline comparison —
+        // storing a stale/missing one here would silently break future
+        // conflict detection for this exact row.
+        const fresh = await pb.collection("milk_logs").getFirstListItem(filter);
+        setKnownValues((prev) => [
+          ...prev.filter((v) => !(v.cattleId === cattleId && v.date === date && v.session === session)),
+                       { cattleId, date, session, liters: effectiveLiters, pbId: fresh.id, updated: (fresh as unknown as { updated: string }).updated },
+        ]);
+        setRowStates((prev) => ({ ...prev, [cattleId]: "saved" }));
+        setTimeout(() => setRowStates((prev) => ({ ...prev, [cattleId]: "idle" })), 1200);
+      } catch {
+        await enqueueWrite({
+          queueId: `${cattleId}__${date}__${session}__${Date.now()}`,
+                           cattleId,
+                           cattleName: lactatingCows.find((c) => c.id === cattleId)?.name ?? cattleId,
+                           date,
+                           session,
+                           liters: effectiveLiters,
+                           baseline,
+                           queuedAt: new Date().toISOString(),
+                           recordedBy: currentUserId,
+                           ...composition,
+        });
+        setRowStates((prev) => ({ ...prev, [cattleId]: "queued" }));
+        await refreshQueue();
       }
+    }
+
+    async function resolveConflictKeepServer(item: QueuedWrite) {
       await removeQueuedWrite(item.queueId);
       await refreshQueue();
-    } catch {
-      // Leave it queued as a conflict — person can retry once back online.
     }
-  }
 
-  const isToday = date === toISODate(new Date());
-  const pendingCount = queue.filter((q) => q.status === "pending" || q.status === "syncing").length;
-  const conflicts = queue.filter((q) => q.status === "conflict");
-  const failedCount = queue.filter((q) => q.status === "failed").length;
+    async function resolveConflictOverwrite(item: QueuedWrite) {
+      try {
+        const pb = createPocketBaseClient();
+        const filter = `cattleId = "${item.cattleId}" && ${dayRangeFilter(item.date)} && session = "${item.session}"`;
+        const existing = await pb.collection("milk_logs").getFirstListItem(filter).catch(() => null);
+        if (existing) {
+          await pb.collection("milk_logs").update(existing.id, {
+            liters: item.liters,
+            fatPercent: item.fatPercent,
+            proteinPercent: item.proteinPercent,
+            safetyStatus: item.safetyStatus,
+          });
+        } else {
+          await pb.collection("milk_logs").create({
+            cattleId: item.cattleId,
+            date: item.date,
+            session: item.session,
+            liters: item.liters,
+            recordedBy: item.recordedBy,
+            fatPercent: item.fatPercent,
+            proteinPercent: item.proteinPercent,
+            safetyStatus: item.safetyStatus,
+          });
+        }
+        await removeQueuedWrite(item.queueId);
+        await refreshQueue();
+      } catch {
+        // Leave it queued as a conflict — person can retry once back online.
+      }
+    }
 
-  return (
-    <div className="max-w-xl">
+    const isToday = date === toISODate(new Date());
+    const pendingCount = queue.filter((q) => q.status === "pending" || q.status === "syncing").length;
+    const conflicts = queue.filter((q) => q.status === "conflict");
+    const failedCount = queue.filter((q) => q.status === "failed").length;
+
+    return (
+      <div className="max-w-xl">
       <div className="flex items-center gap-2 mb-4 text-xs">
-        <span
-          className={[
-            "inline-flex items-center gap-1.5 px-2 py-1 rounded-full font-medium",
-            isOnline ? "bg-forest-700/10 text-forest-700" : "bg-clay-600/10 text-clay-600",
-          ].join(" ")}
-        >
-          <span className={["h-1.5 w-1.5 rounded-full", isOnline ? "bg-forest-700" : "bg-clay-600"].join(" ")} />
-          {isOnline ? "Online" : "Offline — entries will sync automatically"}
-        </span>
-        {pendingCount > 0 && (
-          <span className="px-2 py-1 rounded-full bg-gold-500/10 text-gold-600 font-medium">{pendingCount} pending sync</span>
-        )}
-        {conflicts.length > 0 && (
-          <span className="px-2 py-1 rounded-full bg-danger/10 text-danger font-medium">{conflicts.length} need review</span>
-        )}
-        {failedCount > 0 && (
-          <span className="px-2 py-1 rounded-full bg-danger/10 text-danger font-medium">{failedCount} failed</span>
-        )}
+      <span
+      className={[
+        "inline-flex items-center gap-1.5 px-2 py-1 rounded-full font-medium",
+        isOnline ? "bg-forest-700/10 text-forest-700" : "bg-clay-600/10 text-clay-600",
+      ].join(" ")}
+      >
+      <span className={["h-1.5 w-1.5 rounded-full", isOnline ? "bg-forest-700" : "bg-clay-600"].join(" ")} />
+      {isOnline ? "Online" : "Offline — entries will sync automatically"}
+      </span>
+      {pendingCount > 0 && (
+        <span className="px-2 py-1 rounded-full bg-gold-500/10 text-gold-600 font-medium">{pendingCount} pending sync</span>
+      )}
+      {conflicts.length > 0 && (
+        <span className="px-2 py-1 rounded-full bg-danger/10 text-danger font-medium">{conflicts.length} need review</span>
+      )}
+      {failedCount > 0 && (
+        <span className="px-2 py-1 rounded-full bg-danger/10 text-danger font-medium">{failedCount} failed</span>
+      )}
       </div>
 
       {loadState === "offline-cached" && (
         <p className="text-xs text-clay-600 mb-4 border border-clay-600/30 bg-clay-600/5 rounded px-3 py-2">
-          You&apos;re offline. Showing the last synced list from {snapshotAge ? new Date(snapshotAge).toLocaleString("en-KE") : "earlier"}.
-          New entries save locally and sync automatically once you&apos;re back online.
+        You&apos;re offline. Showing the last synced list from {snapshotAge ? new Date(snapshotAge).toLocaleString("en-KE") : "earlier"}.
+        New entries save locally and sync automatically once you&apos;re back online.
         </p>
       )}
       {loadState === "unavailable" && (
         <p className="text-sm text-danger mb-4">
-          This page needs to load once while online before it can work offline. Please connect and reopen it.
+        This page needs to load once while online before it can work offline. Please connect and reopen it.
         </p>
       )}
 
       {conflicts.length > 0 && (
         <div className="mb-6 border border-danger/30 rounded p-4 bg-danger/5">
-          <h3 className="font-display text-sm text-ink-900 mb-3">Needs your review</h3>
-          <p className="text-xs text-ink-500 mb-3">
-            Someone else recorded a different value for these before your entry synced. Pick which one is correct.
-          </p>
-          <ul className="space-y-3">
-            {conflicts.map((c) => (
-              <li key={c.queueId} className="text-sm">
-                <div className="font-medium text-ink-900">
-                  {c.cattleName} — {c.date} {SESSION_LABEL[c.session]}
-                </div>
-                <div className="text-xs text-ink-500 mb-2">
-                  Your entry: <span className="font-mono-data">{c.liters} L</span> · Current on server:{" "}
-                  <span className="font-mono-data">{c.conflictServerValue ?? "—"} L</span>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => resolveConflictKeepServer(c)}
-                    className="text-xs px-2.5 py-1 rounded border border-line hover:border-ink-300"
-                  >
-                    Keep server value ({c.conflictServerValue} L)
-                  </button>
-                  <button
-                    onClick={() => resolveConflictOverwrite(c)}
-                    className="text-xs px-2.5 py-1 rounded border border-danger/40 text-danger hover:bg-danger/5"
-                  >
-                    Use mine instead ({c.liters} L)
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+        <h3 className="font-display text-sm text-ink-900 mb-3">Needs your review</h3>
+        <p className="text-xs text-ink-500 mb-3">
+        Someone else recorded a different value for these before your entry synced. Pick which one is correct.
+        </p>
+        <ul className="space-y-3">
+        {conflicts.map((c) => (
+          <li key={c.queueId} className="text-sm">
+          <div className="font-medium text-ink-900">
+          {c.cattleName} — {c.date} {SESSION_LABEL[c.session]}
+          </div>
+          <div className="text-xs text-ink-500 mb-2">
+          Your entry: <span className="font-mono-data">{c.liters} L</span> · Current on server:{" "}
+          <span className="font-mono-data">{c.conflictServerValue ?? "—"} L</span>
+          </div>
+          <div className="flex gap-2">
+          <button
+          onClick={() => resolveConflictKeepServer(c)}
+          className="text-xs px-2.5 py-1 rounded border border-line hover:border-ink-300"
+          >
+          Keep server value ({c.conflictServerValue} L)
+          </button>
+          <button
+          onClick={() => resolveConflictOverwrite(c)}
+          className="text-xs px-2.5 py-1 rounded border border-danger/40 text-danger hover:bg-danger/5"
+          >
+          Use mine instead ({c.liters} L)
+          </button>
+          </div>
+          </li>
+        ))}
+        </ul>
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        <input
-          type="date"
-          value={date}
-          max={toISODate(new Date())}
-          onChange={(e) => setDate(e.target.value)}
-          className="text-sm px-3 py-2 rounded border border-line bg-parchment-50 focus:outline-none focus:border-gold-500"
-        />
-        <div className="flex rounded border border-line overflow-hidden">
-          {SESSIONS.map((s) => (
-            <button
-              key={s}
-              onClick={() => setSession(s)}
-              className={[
-                "px-4 py-2 text-sm transition-colors",
-                s === session ? "bg-forest-900 text-parchment-50" : "text-ink-700 hover:bg-parchment-100/70",
-              ].join(" ")}
-            >
-              {SESSION_LABEL[s]}
-            </button>
-          ))}
-        </div>
-        {!isToday && <span className="text-xs text-clay-600">Entering for a past date — requires network</span>}
+      <input
+      type="date"
+      value={date}
+      max={toISODate(new Date())}
+      onChange={(e) => setDate(e.target.value)}
+      className="text-sm px-3 py-2 rounded border border-line bg-parchment-50 focus:outline-none focus:border-gold-500"
+      />
+      <div className="flex rounded border border-line overflow-hidden">
+      {SESSIONS.map((s) => (
+        <button
+        key={s}
+        onClick={() => setSession(s)}
+        className={[
+          "px-4 py-2 text-sm transition-colors",
+          s === session ? "bg-forest-900 text-parchment-50" : "text-ink-700 hover:bg-parchment-100/70",
+        ].join(" ")}
+        >
+        {SESSION_LABEL[s]}
+        </button>
+      ))}
+      </div>
+      {!isToday && <span className="text-xs text-clay-600">Entering for a past date — requires network</span>}
       </div>
 
       {loadState === "loading" && <p className="text-sm text-ink-500">Loading…</p>}
 
       {loadState !== "loading" && lactatingCows.length === 0 && (
         <div className="border border-line rounded p-8 text-center text-sm text-ink-500">
-          No cows are currently lactating. Log a calving on a cow&apos;s page first.
+        No cows are currently lactating. Log a calving on a cow&apos;s page first.
         </div>
       )}
 
       <ul className="space-y-2">
-        {lactatingCows.map((c) => {
-          const quarantine = quarantineMap.get(c.id);
-          const state = rowStates[c.id] ?? "idle";
-          return (
-            <li
-              key={c.id}
-              className={[
-                "flex items-center justify-between gap-4 border rounded px-4 py-3",
-                quarantine ? "border-danger/30 bg-danger/5" : "border-line",
-              ].join(" ")}
+      {lactatingCows.map((c) => {
+        const quarantine = quarantineMap.get(c.id);
+        const state = rowStates[c.id] ?? "idle";
+        const isCompositionOpen = compositionOpen[c.id] ?? false;
+        const composition = compositionFor(c.id);
+        return (
+          <li
+          key={c.id}
+          className={[
+            "border rounded px-4 py-3",
+            quarantine ? "border-danger/30 bg-danger/5" : "border-line",
+          ].join(" ")}
+          >
+          <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+          <div className="flex items-center gap-2">
+          <span className="font-mono-data text-xs text-ink-500">{c.tagId}</span>
+          <span className="font-medium text-ink-900 truncate">{c.name}</span>
+          {quarantine && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-danger text-white shrink-0">
+            Quarantined
+            </span>
+          )}
+          </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+          <input
+          type="number"
+          inputMode="decimal"
+          step="0.1"
+          min="0"
+          placeholder="0.0"
+          disabled={!isToday && loadState !== "online"}
+          value={currentDraft(c.id)}
+          onChange={(e) => setDrafts((prev) => ({ ...prev, [draftKey(c.id)]: e.target.value }))}
+          onBlur={(e) => commit(c.id, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+          className={[
+            "w-24 text-right font-mono-data text-lg px-3 py-2 rounded border bg-white focus:outline-none",
+            state === "error" ? "border-danger" : "border-line focus:border-gold-500",
+          ].join(" ")}
+          />
+          <span className="text-xs text-ink-500 w-6">L</span>
+          <span className="w-14 text-center text-xs" aria-hidden>
+          {state === "saving" && <span className="text-ink-300">…</span>}
+          {state === "saved" && <span className="text-forest-700">✓ saved</span>}
+          {state === "queued" && <span className="text-gold-600">queued</span>}
+          {state === "error" && <span className="text-danger">error</span>}
+          </span>
+          </div>
+          </div>
+
+          <button
+          type="button"
+          onClick={() => toggleComposition(c.id)}
+          className="text-[11px] text-ink-500 hover:text-ink-900 mt-2"
+          >
+          {isCompositionOpen ? "− Hide lab result" : "+ Add lab result (fat/protein/safety)"}
+          </button>
+
+          {isCompositionOpen && (
+            <div className="flex flex-wrap gap-3 items-end mt-2 pt-2 border-t border-line/60">
+            <label className="flex flex-col gap-1 text-[11px] text-ink-500">
+            Fat %
+            <input
+            type="number"
+            inputMode="decimal"
+            step="0.1"
+            min="0"
+            max="100"
+            value={composition.fatPercent}
+            onChange={(e) => setCompositionField(c.id, { fatPercent: e.target.value })}
+            onBlur={(e) => commit(c.id, currentDraft(c.id))}
+            className="w-20 text-sm px-2 py-1 rounded border border-line bg-white focus:outline-none focus:border-gold-500"
+            />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] text-ink-500">
+            Protein %
+            <input
+            type="number"
+            inputMode="decimal"
+            step="0.1"
+            min="0"
+            max="100"
+            value={composition.proteinPercent}
+            onChange={(e) => setCompositionField(c.id, { proteinPercent: e.target.value })}
+            onBlur={(e) => commit(c.id, currentDraft(c.id))}
+            className="w-20 text-sm px-2 py-1 rounded border border-line bg-white focus:outline-none focus:border-gold-500"
+            />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] text-ink-500">
+            Safety
+            <select
+            value={composition.safetyStatus}
+            onChange={(e) => {
+              setCompositionField(c.id, { safetyStatus: e.target.value as CompositionDraft["safetyStatus"] });
+              // Selects don't reliably fire a plain blur the same way — commit right away.
+              setTimeout(() => commit(c.id, currentDraft(c.id)), 0);
+            }}
+            className="text-sm px-2 py-1 rounded border border-line bg-white focus:outline-none focus:border-gold-500"
             >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono-data text-xs text-ink-500">{c.tagId}</span>
-                  <span className="font-medium text-ink-900 truncate">{c.name}</span>
-                  {quarantine && (
-                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-danger text-white shrink-0">
-                      Quarantined
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  min="0"
-                  placeholder="0.0"
-                  disabled={!isToday && loadState !== "online"}
-                  value={currentDraft(c.id)}
-                  onChange={(e) => setDrafts((prev) => ({ ...prev, [draftKey(c.id)]: e.target.value }))}
-                  onBlur={(e) => commit(c.id, e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                  }}
-                  className={[
-                    "w-24 text-right font-mono-data text-lg px-3 py-2 rounded border bg-white focus:outline-none",
-                    state === "error" ? "border-danger" : "border-line focus:border-gold-500",
-                  ].join(" ")}
-                />
-                <span className="text-xs text-ink-500 w-6">L</span>
-                <span className="w-14 text-center text-xs" aria-hidden>
-                  {state === "saving" && <span className="text-ink-300">…</span>}
-                  {state === "saved" && <span className="text-forest-700">✓ saved</span>}
-                  {state === "queued" && <span className="text-gold-600">queued</span>}
-                  {state === "error" && <span className="text-danger">error</span>}
-                </span>
-              </div>
-            </li>
-          );
-        })}
+            <option value="">Untested</option>
+            <option value="passed">Passed</option>
+            <option value="failed">Failed</option>
+            </select>
+            </label>
+            </div>
+          )}
+          </li>
+        );
+      })}
       </ul>
 
       <div className="mt-6">
-        <LinkButton href="/dairy/milk-log" variant="secondary" size="sm">
-          Back to log
-        </LinkButton>
+      <LinkButton href="/dairy/milk-log" variant="secondary" size="sm">
+      Back to log
+      </LinkButton>
       </div>
-    </div>
-  );
+      </div>
+    );
 }

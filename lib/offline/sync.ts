@@ -24,11 +24,27 @@ export function dayRangeFilter(dateISO: string): string {
  * narrow and interface-based (not importing the real PocketBase type)
  * so this logic can be unit-tested with a plain mock object, no real
  * network or browser required. See lib/offline/sync.test.ts.
+ *
+ * create()/update() now also accept the QBP composition fields
+ * (fatPercent/proteinPercent/safetyStatus) — optional on both, same as
+ * on the real milk_logs schema (pb_migrations/024).
  */
 export interface MilkLogsCollectionClient {
   getFirstListItem(filter: string): Promise<{ id: string; liters: number; updated: string } | null>;
-  create(data: { cattleId: string; date: string; session: string; liters: number; recordedBy: string }): Promise<{ id: string }>;
-  update(id: string, data: { liters: number }): Promise<void>;
+  create(data: {
+    cattleId: string;
+    date: string;
+    session: string;
+    liters: number;
+    recordedBy: string;
+    fatPercent?: number;
+    proteinPercent?: number;
+    safetyStatus?: "passed" | "failed";
+  }): Promise<{ id: string }>;
+  update(
+    id: string,
+    data: { liters: number; fatPercent?: number; proteinPercent?: number; safetyStatus?: "passed" | "failed" }
+  ): Promise<void>;
 }
 
 export interface FlushResult {
@@ -69,8 +85,8 @@ export async function flushQueue(milkLogs: MilkLogsCollectionClient): Promise<Fl
 
     try {
       const server = await milkLogs
-        .getFirstListItem(`cattleId = "${item.cattleId}" && ${dayRangeFilter(item.date)} && session = "${item.session}"`)
-        .catch(() => null);
+      .getFirstListItem(`cattleId = "${item.cattleId}" && ${dayRangeFilter(item.date)} && session = "${item.session}"`)
+      .catch(() => null);
 
       const conflict = detectConflict(item, server);
       if (conflict) {
@@ -83,7 +99,12 @@ export async function flushQueue(milkLogs: MilkLogsCollectionClient): Promise<Fl
       }
 
       if (server) {
-        await milkLogs.update(server.id, { liters: item.liters });
+        await milkLogs.update(server.id, {
+          liters: item.liters,
+          fatPercent: item.fatPercent,
+          proteinPercent: item.proteinPercent,
+          safetyStatus: item.safetyStatus,
+        });
       } else {
         await milkLogs.create({
           cattleId: item.cattleId,
@@ -91,6 +112,9 @@ export async function flushQueue(milkLogs: MilkLogsCollectionClient): Promise<Fl
           session: item.session,
           liters: item.liters,
           recordedBy: item.recordedBy,
+          fatPercent: item.fatPercent,
+          proteinPercent: item.proteinPercent,
+          safetyStatus: item.safetyStatus,
         });
       }
       await removeQueuedWrite(item.queueId);
