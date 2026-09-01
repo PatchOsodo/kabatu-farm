@@ -226,9 +226,7 @@ export async function createCalvingRecord(
   return { calving, lactation: mapLactationCycle(lactationRecord) };
 }
 
-export type LactationUpdateInput = Partial
-Pick<LactationCycle, "stage" | "endDate" | "expectedDryOffDate" | "peakYieldLiters">
->;
+export type LactationUpdateInput = Partial<Pick<LactationCycle, "stage" | "endDate" | "expectedDryOffDate" | "peakYieldLiters">>;
 
 export async function updateLactationCycle(id: string, input: LactationUpdateInput): Promise<LactationCycle> {
   const pb = await getServerPb();
