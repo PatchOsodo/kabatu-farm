@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LinkButton } from "@/components/ui/Button";
 import type { Cattle, HealthRecord, LactationCycle, MilkLog } from "@/types/farm";
 import { createPocketBaseClient } from "@/lib/pb";
@@ -16,7 +16,7 @@ import {
   type KnownMilkValue,
   type QueuedWrite,
 } from "@/lib/offline/db";
-import { flushQueue, dayRangeFilter, type MilkLogsCollectionClient } from "@/lib/offline/sync";
+import { flushQueue, retryQueuedWrite, dayRangeFilter, type MilkLogsCollectionClient } from "@/lib/offline/sync";
 
 const SESSIONS: MilkLog["session"][] = ["morning", "midday", "evening"];
 const SESSION_LABEL: Record<MilkLog["session"], string> = {
@@ -99,12 +99,23 @@ export function MilkQuickEntry({
   // compositionOpen is keyed by cattleId only — purely a UI show/hide
   // toggle, fine to persist across date/session switches. compositionDrafts
   // is keyed by the SAME draftKey() (cattleId+date+session) the liters
-  // draft already uses — a fix from the original version of this
-  // component, which keyed composition drafts by cattleId alone and could
-  // show one date's lab result while the person was actually editing a
-  // different date's row after switching the date picker.
+  // draft already uses.
   const [compositionOpen, setCompositionOpen] = useState<Record<string, boolean>>({});
   const [compositionDrafts, setCompositionDrafts] = useState<Record<string, CompositionDraft>>({});
+
+  // Serializes commit() calls per (cattleId+date+session) key. Fixes a
+  // real duplicate-record bug: with three separate inputs per row (Fat,
+  // Protein, Safety) each independently calling commit() on blur/change,
+  // two commits for the SAME row firing close together (e.g. tabbing
+  // quickly through the fields) could both run their "does a record
+  // already exist?" check before either one's create() finished — both
+  // would see "no" and both call create(), producing two milk_logs rows
+  // for the same cattle/date/session instead of one. Chaining each
+  // commit's actual work onto the previous one's completion (per key)
+  // means the second commit's existence-check always runs AFTER the
+  // first commit has finished, so it correctly finds the just-created
+  // record and updates it instead of creating a duplicate.
+  const commitQueueRef = useRef<Record<string, Promise<void>>>({});
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -298,10 +309,8 @@ export function MilkQuickEntry({
       };
     }
 
-    async function commit(cattleId: string, raw: string) {
-      const k = draftKey(cattleId);
-      setDrafts((prev) => ({ ...prev, [k]: raw }));
-
+    /** The actual read-then-write logic, run strictly one-at-a-time per row key via the queue in commit() below — never called directly. */
+    async function performCommit(cattleId: string, raw: string) {
       const parsed = parseFloat(raw);
       const liters = Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 10) / 10 : undefined;
       const known = findKnown(cattleId);
@@ -380,8 +389,31 @@ export function MilkQuickEntry({
       }
     }
 
+    /**
+     * Public entry point every input's onBlur/onChange calls. Updates the
+     * liters draft immediately (for responsive typing), then queues the
+     * actual save so it runs strictly after any still-in-flight save for
+     * this same row — see commitQueueRef's comment above for why this
+     * exists.
+     */
+    function commit(cattleId: string, raw: string) {
+      const k = draftKey(cattleId);
+      setDrafts((prev) => ({ ...prev, [k]: raw }));
+
+      const prior = commitQueueRef.current[k] ?? Promise.resolve();
+      const next = prior.then(() => performCommit(cattleId, raw));
+      commitQueueRef.current[k] = next.catch(() => undefined);
+    }
+
     async function resolveConflictKeepServer(item: QueuedWrite) {
       await removeQueuedWrite(item.queueId);
+      await refreshQueue();
+    }
+
+    async function retryFailed(item: QueuedWrite) {
+      const pb = createPocketBaseClient();
+      const client = makeMilkLogsClient(pb);
+      await retryQueuedWrite(client, item.queueId);
       await refreshQueue();
     }
 
@@ -454,6 +486,32 @@ export function MilkQuickEntry({
         <p className="text-sm text-danger mb-4">
         This page needs to load once while online before it can work offline. Please connect and reopen it.
         </p>
+      )}
+
+      {failedCount > 0 && (
+        <div className="mb-6 border border-danger/30 rounded p-4 bg-danger/5">
+          <h3 className="font-display text-sm text-ink-900 mb-3">Couldn&apos;t save</h3>
+          <p className="text-xs text-ink-500 mb-3">
+            These entries failed to save and won&apos;t be retried automatically. Check the values, then retry.
+          </p>
+          <ul className="space-y-2">
+            {queue
+              .filter((q) => q.status === "failed")
+              .map((f) => (
+                <li key={f.queueId} className="flex items-center justify-between text-sm">
+                  <span>
+                    {f.cattleName} — {f.date} {SESSION_LABEL[f.session]} · {f.liters} L
+                  </span>
+                  <button
+                    onClick={() => retryFailed(f)}
+                    className="text-xs px-2.5 py-1 rounded border border-line hover:border-ink-300"
+                  >
+                    Retry
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </div>
       )}
 
       {conflicts.length > 0 && (
@@ -624,8 +682,7 @@ export function MilkQuickEntry({
             value={composition.safetyStatus}
             onChange={(e) => {
               setCompositionField(c.id, { safetyStatus: e.target.value as CompositionDraft["safetyStatus"] });
-              // Selects don't reliably fire a plain blur the same way — commit right away.
-              setTimeout(() => commit(c.id, currentDraft(c.id)), 0);
+              commit(c.id, currentDraft(c.id));
             }}
             className="text-sm px-2 py-1 rounded border border-line bg-white focus:outline-none focus:border-gold-500"
             >

@@ -24,10 +24,6 @@ export function dayRangeFilter(dateISO: string): string {
  * narrow and interface-based (not importing the real PocketBase type)
  * so this logic can be unit-tested with a plain mock object, no real
  * network or browser required. See lib/offline/sync.test.ts.
- *
- * create()/update() now also accept the QBP composition fields
- * (fatPercent/proteinPercent/safetyStatus) — optional on both, same as
- * on the real milk_logs schema (pb_migrations/024).
  */
 export interface MilkLogsCollectionClient {
   getFirstListItem(filter: string): Promise<{ id: string; liters: number; updated: string } | null>;
@@ -71,61 +67,92 @@ export interface FlushResult {
  *
  * Conflicts are never auto-resolved here — they're left in the queue
  * with status "conflict" and the server's current value attached, for a
- * person to look at and decide which number is actually correct. This
- * function is deliberately never called again for an item already
- * marked "conflict" (see the skip at the top of the loop) — silently
- * retrying a conflict would just flip a coin on whose data wins.
+ * person to look at and decide which number is actually correct.
+ *
+ * FIX (this update): items already marked "failed" are now ALSO skipped
+ * from automatic retry, same as "conflict" — previously only "conflict"
+ * was skipped, so a write that fails with a PERMANENT error (e.g. a 400
+ * validation rejection, which will never succeed by simply trying
+ * again) got silently retried on every single flushQueue call
+ * thereafter (every reconnect, every page load). On a flaky connection
+ * that reconnects repeatedly, this produced a real retry storm —
+ * confirmed via a live report of a dozen identical failing requests
+ * roughly one round-trip apart. A failed item now requires an explicit
+ * retryQueuedWrite() call (see below) — surfaced in the UI as a manual
+ * "Retry" action — rather than being hammered automatically forever.
  */
 export async function flushQueue(milkLogs: MilkLogsCollectionClient): Promise<FlushResult> {
   const items = await listQueuedWrites();
   const result: FlushResult = { synced: 0, conflicts: 0, failed: 0 };
 
   for (const item of items) {
-    if (item.status === "conflict") continue;
+    if (item.status === "conflict" || item.status === "failed") continue;
 
-    try {
-      const server = await milkLogs
-      .getFirstListItem(`cattleId = "${item.cattleId}" && ${dayRangeFilter(item.date)} && session = "${item.session}"`)
-      .catch(() => null);
-
-      const conflict = detectConflict(item, server);
-      if (conflict) {
-        await updateQueuedWrite(item.queueId, {
-          status: "conflict",
-          conflictServerValue: server?.liters,
-        });
-        result.conflicts++;
-        continue;
-      }
-
-      if (server) {
-        await milkLogs.update(server.id, {
-          liters: item.liters,
-          fatPercent: item.fatPercent,
-          proteinPercent: item.proteinPercent,
-          safetyStatus: item.safetyStatus,
-        });
-      } else {
-        await milkLogs.create({
-          cattleId: item.cattleId,
-          date: item.date,
-          session: item.session,
-          liters: item.liters,
-          recordedBy: item.recordedBy,
-          fatPercent: item.fatPercent,
-          proteinPercent: item.proteinPercent,
-          safetyStatus: item.safetyStatus,
-        });
-      }
-      await removeQueuedWrite(item.queueId);
-      result.synced++;
-    } catch {
-      await updateQueuedWrite(item.queueId, { status: "failed" });
-      result.failed++;
-    }
+    await attemptOne(milkLogs, item, result);
   }
 
   return result;
+}
+
+/**
+ * Retries exactly one previously-failed queued write, on explicit user
+ * action (e.g. a "Retry" button) — the deliberate escape hatch now that
+ * flushQueue no longer retries "failed" items on its own. Resets status
+ * back through the same conflict-detection logic as a normal flush, so
+ * a manual retry is just as safe against concurrent edits as the
+ * original attempt was.
+ */
+export async function retryQueuedWrite(milkLogs: MilkLogsCollectionClient, queueId: string): Promise<FlushResult> {
+  const items = await listQueuedWrites();
+  const item = items.find((i) => i.queueId === queueId);
+  const result: FlushResult = { synced: 0, conflicts: 0, failed: 0 };
+  if (!item) return result;
+
+  await attemptOne(milkLogs, item, result);
+  return result;
+}
+
+async function attemptOne(milkLogs: MilkLogsCollectionClient, item: QueuedWrite, result: FlushResult): Promise<void> {
+  try {
+    const server = await milkLogs
+    .getFirstListItem(`cattleId = "${item.cattleId}" && ${dayRangeFilter(item.date)} && session = "${item.session}"`)
+    .catch(() => null);
+
+    const conflict = detectConflict(item, server);
+    if (conflict) {
+      await updateQueuedWrite(item.queueId, {
+        status: "conflict",
+        conflictServerValue: server?.liters,
+      });
+      result.conflicts++;
+      return;
+    }
+
+    if (server) {
+      await milkLogs.update(server.id, {
+        liters: item.liters,
+        fatPercent: item.fatPercent,
+        proteinPercent: item.proteinPercent,
+        safetyStatus: item.safetyStatus,
+      });
+    } else {
+      await milkLogs.create({
+        cattleId: item.cattleId,
+        date: item.date,
+        session: item.session,
+        liters: item.liters,
+        recordedBy: item.recordedBy,
+        fatPercent: item.fatPercent,
+        proteinPercent: item.proteinPercent,
+        safetyStatus: item.safetyStatus,
+      });
+    }
+    await removeQueuedWrite(item.queueId);
+    result.synced++;
+  } catch {
+    await updateQueuedWrite(item.queueId, { status: "failed" });
+    result.failed++;
+  }
 }
 
 function detectConflict(
