@@ -156,15 +156,27 @@ export function MilkQuickEntry({
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
-      setLoadState("loading");
-      try {
-        const pb = createPocketBaseClient();
-        const [cattleRecords, cycleRecords, milkRecords] = await Promise.all([
-          pb.collection("cattle").getFullList(),
-                                                                             pb.collection("lactation_cycles").getFullList(),
-                                                                             pb.collection("milk_logs").getFullList({ filter: dayRangeFilter(toISODate(new Date())) }),
-        ]);
+    useEffect(() => {
+      let cancelled = false;
+
+      async function load() {
+        setLoadState("loading");
+        try {
+          const pb = createPocketBaseClient();
+          const [cattleRecords, cycleRecords, milkRecords] = await Promise.all([
+            pb.collection("cattle").getFullList(),
+            pb.collection("lactation_cycles").getFullList(),
+            // FIX: previously always filtered to TODAY's date regardless of
+            // which date was selected in the picker. knownValues (and
+            // therefore findKnown()'s create-vs-update decision, and the
+            // conflict-detection baseline) was structurally wrong for any
+            // past-date entry — it could never find an existing record for
+            // a prior date, so it always believed no record existed yet.
+            // Fetching the CURRENTLY SELECTED date on mount, and re-fetching
+            // whenever the date changes (see the new effect below), fixes
+            // this for both the initial load and mid-session date switches.
+            pb.collection("milk_logs").getFullList({ filter: dayRangeFilter(date) }),
+          ]);
 
         const cattleList = cattleRecords as unknown as Cattle[];
         const cycles = cycleRecords as unknown as LactationCycle[];
@@ -242,6 +254,52 @@ export function MilkQuickEntry({
   useEffect(() => {
     if (isOnline) attemptSync();
   }, [isOnline, attemptSync]);
+
+  // Re-fetches known milk_logs values whenever the selected date changes
+  // (after the initial mount-time load above already covers the date the
+  // page opened with). Without this, switching to a past date left
+  // knownValues stuck on whatever date was loaded first, making every
+  // commit() on that row believe no record exists yet — even when one
+  // genuinely does — and misinformed the create-vs-update decision and
+  // conflict baseline accordingly.
+  useEffect(() => {
+    if (loadState !== "online") return;
+    let cancelled = false;
+
+    async function refetchForDate() {
+      try {
+        const pb = createPocketBaseClient();
+        const milkRecords = await pb.collection("milk_logs").getFullList({ filter: dayRangeFilter(date) });
+        const logs = milkRecords as unknown as (MilkLog & { updated: string })[];
+        const known: KnownMilkValue[] = logs.map((l) => ({
+          cattleId: l.cattleId,
+          date: l.date,
+          session: l.session,
+          liters: l.liters,
+          pbId: (l as unknown as { id: string }).id,
+          updated: l.updated,
+          fatPercent: l.fatPercent,
+          proteinPercent: l.proteinPercent,
+          safetyStatus: l.safetyStatus,
+        }));
+        if (cancelled) return;
+        // Merge rather than replace — keep any other date's already-loaded
+        // knownValues (and any not-yet-synced local edits reflected via
+        // drafts) intact, only refresh entries for THIS date.
+        setKnownValues((prev) => [...prev.filter((v) => v.date !== date), ...known]);
+      } catch {
+        // Offline or request failed — leave whatever knownValues already
+        // has for this date; commit() will fall back to the offline queue
+        // as usual if a save is attempted.
+      }
+    }
+
+    refetchForDate();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
 
     const quarantineMap = useMemo(() => {
       const map = new Map<string, HealthRecord>();
