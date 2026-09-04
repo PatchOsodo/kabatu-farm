@@ -184,8 +184,8 @@ async function scenarioD_legitimateOwnResync() {
   await clearQueueForTest();
   const server = new FakeServer();
 
-  const created = await server.create({ cattleId: "cow4", date: "2026-08-09", session: "midday", liters: 5.0, recordedBy: "userA" });
-  const baselineRecord = await server.getFirstListItem(`cattleId = "cow4" && ${dayRangeFilter("2026-08-09")} && session = "midday"`);
+  const created = await server.create({ cattleId: "cow4", date: "2026-08-09", session: "evening", liters: 5.0, recordedBy: "userA" });
+  const baselineRecord = await server.getFirstListItem(`cattleId = "cow4" && ${dayRangeFilter("2026-08-09")} && session = "evening"`);
 
   // Same device corrects its own entry — nobody else touched it in between.
   await enqueueWrite({
