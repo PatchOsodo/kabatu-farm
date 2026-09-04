@@ -178,8 +178,8 @@ function buildMockMilkLogs(): MilkLog[] {
   const logs: MilkLog[] = [];
   const sessions: MilkLog["session"][] = ["morning", "evening"];
   const baseYield: Record<string, Record<MilkLog["session"], number>> = {
-    c1: { morning: 9.5, midday: 4, evening: 8.5 },
-    c2: { morning: 7, midday: 3, evening: 6.5 },
+    c1: { morning: 13.5, evening: 8.5 },
+    c2: { morning: 10, evening: 6.5 },
   };
 
   const today = new Date();
