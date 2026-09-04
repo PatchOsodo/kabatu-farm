@@ -193,7 +193,7 @@ async function scenarioD_legitimateOwnResync() {
     cattleId: "cow4",
     cattleName: "Doto",
     date: "2026-08-09",
-    session: "midday",
+    session: "evening",
     liters: 5.3,
     baseline: { liters: 5.0, pbId: baselineRecord!.id, updated: baselineRecord!.updated },
     queuedAt: new Date().toISOString(),
