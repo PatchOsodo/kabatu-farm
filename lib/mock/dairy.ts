@@ -176,7 +176,7 @@ export const MOCK_BREEDING_RECORDS: BreedingRecord[] = [
 /** 7 days of milk logs for the two lactating cows, 3 sessions/day */
 function buildMockMilkLogs(): MilkLog[] {
   const logs: MilkLog[] = [];
-  const sessions: MilkLog["session"][] = ["morning", "midday", "evening"];
+  const sessions: MilkLog["session"][] = ["morning", "evening"];
   const baseYield: Record<string, Record<MilkLog["session"], number>> = {
     c1: { morning: 9.5, midday: 4, evening: 8.5 },
     c2: { morning: 7, midday: 3, evening: 6.5 },
