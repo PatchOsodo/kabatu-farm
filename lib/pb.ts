@@ -22,12 +22,47 @@ import type { UserRole, Enterprise } from "@/types/farm";
 export function createPocketBaseClient(cookieAuthStore?: string) {
   const isServer = typeof window === "undefined";
   const url = isServer
-    ? process.env.POCKETBASE_INTERNAL_URL || process.env.NEXT_PUBLIC_POCKETBASE_URL
-    : process.env.NEXT_PUBLIC_POCKETBASE_URL;
+  ? process.env.POCKETBASE_INTERNAL_URL || process.env.NEXT_PUBLIC_POCKETBASE_URL
+  : process.env.NEXT_PUBLIC_POCKETBASE_URL;
 
   const pb = new PocketBase(url);
   if (cookieAuthStore) {
     pb.authStore.loadFromCookie(cookieAuthStore);
+  } else if (!isServer && !pb.authStore.isValid && typeof document !== "undefined") {
+    // FIX: real bug found via a live-debugging session (2026-09-04) — a
+    // browser-side PocketBase instance created with NO explicit
+    // cookieAuthStore argument (as every "use client" component that
+    // writes directly via the SDK does — see MilkQuickEntry.tsx, the
+    // only page in this app that bypasses Server Actions for offline
+    // capability) relies ENTIRELY on the SDK's own localStorage-backed
+    // authStore, which is only ever populated when the BROWSER itself
+    // calls authWithPassword() (as lib/pb.ts's own login() does).
+    //
+    // app/demo/route.ts authenticates and sets the pb_auth cookie
+    // entirely SERVER-SIDE (it's a Route Handler) — it never causes the
+    // browser to call authWithPassword() itself, so localStorage stays
+    // empty after visiting /demo, even though the cookie (and therefore
+    // every server-rendered page) correctly reflects a logged-in
+    // session. The practical symptom: Topbar shows the demo user as
+    // logged in, MilkLogView's server-fetched history renders fine, but
+    // MilkQuickEntry's direct browser writes silently go out
+    // unauthenticated and PocketBase rejects them with a generic 400
+    // (empty error `data`, since the request never gets far enough for
+    // field-level validation — it's rejected by the collection's own
+    // createRule access check, `@request.auth.id != ''`, before that).
+    //
+    // Fix: if the browser-side authStore has no valid session yet, fall
+    // back to hydrating it from the pb_auth cookie (already set with
+    // httpOnly: false by both /demo and the normal login() flow
+    // specifically so client JS CAN read it — see login()'s own
+    // comment). document.cookie contains every cookie for this origin
+    // as one semicolon-separated string; loadFromCookie() parses out
+    // the "pb_auth" key itself, the same as the server-side branch
+    // above already does with an explicit cookie value. This makes the
+    // browser SDK instance and the server-rendered session agree,
+    // regardless of which login path (/login vs /demo) established the
+    // cookie in the first place.
+    pb.authStore.loadFromCookie(document.cookie);
   }
   return pb;
 }
