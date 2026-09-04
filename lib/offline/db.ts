@@ -105,7 +105,7 @@ export interface QueuedWrite {
   cattleId: string;
   cattleName: string; // denormalized for display in the sync/conflict UI without a lookup
   date: string;
-  session: "morning" | "midday" | "evening";
+  session: "morning" | "evening";
   liters: number;
   baseline: { liters: number; pbId?: string; updated?: string } | null;
   queuedAt: string;

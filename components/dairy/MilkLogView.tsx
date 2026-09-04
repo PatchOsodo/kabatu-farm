@@ -6,10 +6,9 @@ import type { Cattle, HealthRecord, LactationCycle, MilkLog } from "@/types/farm
 import { getActiveQuarantine } from "@/lib/quarantine";
 import { getActiveLactationCattleIds } from "@/lib/lactation";
 
-const SESSIONS: MilkLog["session"][] = ["morning", "midday", "evening"];
+const SESSIONS: MilkLog["session"][] = ["morning", "evening"];
 const SESSION_LABEL: Record<MilkLog["session"], string> = {
   morning: "AM",
-  midday: "Noon",
   evening: "PM",
 };
 

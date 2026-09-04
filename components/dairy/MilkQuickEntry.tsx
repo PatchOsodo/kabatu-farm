@@ -18,10 +18,9 @@ import {
 } from "@/lib/offline/db";
 import { flushQueue, retryQueuedWrite, dayRangeFilter, type MilkLogsCollectionClient } from "@/lib/offline/sync";
 
-const SESSIONS: MilkLog["session"][] = ["morning", "midday", "evening"];
+const SESSIONS: MilkLog["session"][] = ["morning", "evening"];
 const SESSION_LABEL: Record<MilkLog["session"], string> = {
   morning: "Morning",
-  midday: "Midday",
   evening: "Evening",
 };
 
@@ -29,11 +28,12 @@ function toISODate(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+// Cutoff of 14:00 (2pm) as a reasonable midpoint between a morning and
+// evening milking — this is a judgment call, not a farm-specified
+// schedule; adjust if the actual milking times differ.
 function defaultSession(): MilkLog["session"] {
   const hour = new Date().getHours();
-  if (hour < 11) return "morning";
-  if (hour < 16) return "midday";
-  return "evening";
+  return hour < 14 ? "morning" : "evening";
 }
 
 /** Adapts the browser PocketBase SDK to the narrow interface flushQueue()/sync.ts expects — keeps sync.ts unit-testable without a real client. */
@@ -156,27 +156,19 @@ export function MilkQuickEntry({
   useEffect(() => {
     let cancelled = false;
 
-    useEffect(() => {
-      let cancelled = false;
-
-      async function load() {
-        setLoadState("loading");
-        try {
-          const pb = createPocketBaseClient();
-          const [cattleRecords, cycleRecords, milkRecords] = await Promise.all([
-            pb.collection("cattle").getFullList(),
-            pb.collection("lactation_cycles").getFullList(),
-            // FIX: previously always filtered to TODAY's date regardless of
-            // which date was selected in the picker. knownValues (and
-            // therefore findKnown()'s create-vs-update decision, and the
-            // conflict-detection baseline) was structurally wrong for any
-            // past-date entry — it could never find an existing record for
-            // a prior date, so it always believed no record existed yet.
-            // Fetching the CURRENTLY SELECTED date on mount, and re-fetching
-            // whenever the date changes (see the new effect below), fixes
-            // this for both the initial load and mid-session date switches.
-            pb.collection("milk_logs").getFullList({ filter: dayRangeFilter(date) }),
-          ]);
+    async function load() {
+      setLoadState("loading");
+      try {
+        const pb = createPocketBaseClient();
+        const [cattleRecords, cycleRecords, milkRecords] = await Promise.all([
+          pb.collection("cattle").getFullList(),
+                                                                             pb.collection("lactation_cycles").getFullList(),
+                                                                             // Fetches whatever date is selected at mount (previously
+                                                                             // hardcoded to today's date regardless of the picker) — see
+                                                                             // the date-change effect below for why this also needs to
+                                                                             // re-run whenever the date is switched afterward.
+                                                                             pb.collection("milk_logs").getFullList({ filter: dayRangeFilter(date) }),
+        ]);
 
         const cattleList = cattleRecords as unknown as Cattle[];
         const cycles = cycleRecords as unknown as LactationCycle[];
@@ -247,7 +239,8 @@ export function MilkQuickEntry({
     };
     // Deliberately only on mount — fetches once, then relies on local
     // state + the offline queue rather than refetching on every
-    // date/session change.
+    // date/session change (date changes are now handled by the
+    // dedicated effect below instead).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -255,51 +248,51 @@ export function MilkQuickEntry({
     if (isOnline) attemptSync();
   }, [isOnline, attemptSync]);
 
-  // Re-fetches known milk_logs values whenever the selected date changes
-  // (after the initial mount-time load above already covers the date the
-  // page opened with). Without this, switching to a past date left
-  // knownValues stuck on whatever date was loaded first, making every
-  // commit() on that row believe no record exists yet — even when one
-  // genuinely does — and misinformed the create-vs-update decision and
-  // conflict baseline accordingly.
-  useEffect(() => {
-    if (loadState !== "online") return;
-    let cancelled = false;
+    // Re-fetches known milk_logs values whenever the selected date changes
+    // (the initial mount-time load above already covers the date the page
+    // opened with). FIX: without this, switching to a past date left
+    // knownValues stuck on whatever date was loaded first, so commit() on
+    // any row for that date always believed no record existed yet — even
+    // when one genuinely did — which corrupted both the create-vs-update
+    // decision and the conflict-detection baseline for every past-date
+    // entry.
+    useEffect(() => {
+      if (loadState !== "online") return;
+      let cancelled = false;
 
-    async function refetchForDate() {
-      try {
-        const pb = createPocketBaseClient();
-        const milkRecords = await pb.collection("milk_logs").getFullList({ filter: dayRangeFilter(date) });
-        const logs = milkRecords as unknown as (MilkLog & { updated: string })[];
-        const known: KnownMilkValue[] = logs.map((l) => ({
-          cattleId: l.cattleId,
-          date: l.date,
-          session: l.session,
-          liters: l.liters,
-          pbId: (l as unknown as { id: string }).id,
-          updated: l.updated,
-          fatPercent: l.fatPercent,
-          proteinPercent: l.proteinPercent,
-          safetyStatus: l.safetyStatus,
-        }));
-        if (cancelled) return;
-        // Merge rather than replace — keep any other date's already-loaded
-        // knownValues (and any not-yet-synced local edits reflected via
-        // drafts) intact, only refresh entries for THIS date.
-        setKnownValues((prev) => [...prev.filter((v) => v.date !== date), ...known]);
-      } catch {
-        // Offline or request failed — leave whatever knownValues already
-        // has for this date; commit() will fall back to the offline queue
-        // as usual if a save is attempted.
+      async function refetchForDate() {
+        try {
+          const pb = createPocketBaseClient();
+          const milkRecords = await pb.collection("milk_logs").getFullList({ filter: dayRangeFilter(date) });
+          const logs = milkRecords as unknown as (MilkLog & { updated: string })[];
+          const known: KnownMilkValue[] = logs.map((l) => ({
+            cattleId: l.cattleId,
+            date: l.date,
+            session: l.session,
+            liters: l.liters,
+            pbId: (l as unknown as { id: string }).id,
+                                                           updated: l.updated,
+                                                           fatPercent: l.fatPercent,
+                                                           proteinPercent: l.proteinPercent,
+                                                           safetyStatus: l.safetyStatus,
+          }));
+          if (cancelled) return;
+          // Merge rather than replace — keep any other date's already-loaded
+          // knownValues intact, only refresh entries for THIS date.
+          setKnownValues((prev) => [...prev.filter((v) => v.date !== date), ...known]);
+        } catch {
+          // Offline or request failed — leave whatever knownValues already
+          // has for this date; commit() will fall back to the offline queue
+          // as usual if a save is attempted.
+        }
       }
-    }
 
-    refetchForDate();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date]);
+      refetchForDate();
+      return () => {
+        cancelled = true;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [date]);
 
     const quarantineMap = useMemo(() => {
       const map = new Map<string, HealthRecord>();
@@ -468,13 +461,6 @@ export function MilkQuickEntry({
       await refreshQueue();
     }
 
-    async function retryFailed(item: QueuedWrite) {
-      const pb = createPocketBaseClient();
-      const client = makeMilkLogsClient(pb);
-      await retryQueuedWrite(client, item.queueId);
-      await refreshQueue();
-    }
-
     async function resolveConflictOverwrite(item: QueuedWrite) {
       try {
         const pb = createPocketBaseClient();
@@ -504,6 +490,13 @@ export function MilkQuickEntry({
       } catch {
         // Leave it queued as a conflict — person can retry once back online.
       }
+    }
+
+    async function retryFailed(item: QueuedWrite) {
+      const pb = createPocketBaseClient();
+      const client = makeMilkLogsClient(pb);
+      await retryQueuedWrite(client, item.queueId);
+      await refreshQueue();
     }
 
     const isToday = date === toISODate(new Date());
@@ -548,28 +541,28 @@ export function MilkQuickEntry({
 
       {failedCount > 0 && (
         <div className="mb-6 border border-danger/30 rounded p-4 bg-danger/5">
-          <h3 className="font-display text-sm text-ink-900 mb-3">Couldn&apos;t save</h3>
-          <p className="text-xs text-ink-500 mb-3">
-            These entries failed to save and won&apos;t be retried automatically. Check the values, then retry.
-          </p>
-          <ul className="space-y-2">
-            {queue
-              .filter((q) => q.status === "failed")
-              .map((f) => (
-                <li key={f.queueId} className="flex items-center justify-between text-sm">
-                  <span>
-                    {f.cattleName} — {f.date} {SESSION_LABEL[f.session]} · {f.liters} L
-                  </span>
-                  <button
-                    onClick={() => retryFailed(f)}
-                    className="text-xs px-2.5 py-1 rounded border border-line hover:border-ink-300"
-                  >
-                    Retry
-                  </button>
-                </li>
-              ))}
+        <h3 className="font-display text-sm text-ink-900 mb-3">Couldn&apos;t save</h3>
+        <p className="text-xs text-ink-500 mb-3">
+        These entries failed to save and won&apos;t be retried automatically. Check the values, then retry.
+        </p>
+        <ul className="space-y-2">
+        {queue
+          .filter((q) => q.status === "failed")
+          .map((f) => (
+            <li key={f.queueId} className="flex items-center justify-between text-sm">
+            <span>
+            {f.cattleName} — {f.date} {SESSION_LABEL[f.session]} · {f.liters} L
+            </span>
+            <button
+            onClick={() => retryFailed(f)}
+            className="text-xs px-2.5 py-1 rounded border border-line hover:border-ink-300"
+            >
+            Retry
+            </button>
+            </li>
+          ))}
           </ul>
-        </div>
+          </div>
       )}
 
       {conflicts.length > 0 && (

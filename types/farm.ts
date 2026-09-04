@@ -116,7 +116,7 @@ export interface MilkLog {
   id: UUID;
   cattleId: UUID;
   date: ISODate;
-  session: "morning" | "midday" | "evening";
+  session: "morning" | "evening";
   liters: number;
   recordedBy: UUID; // User id
   createdAt: ISODateTime;
